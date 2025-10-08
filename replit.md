@@ -6,6 +6,12 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
+**2025-10-08 (Latest)**: Added RPC bootstrap commands to actively request data from Shelly upon WebSocket connection:
+- `NotifyStatus` with `{"enable": true}` to activate streaming notifications
+- `Shelly.GetStatus` to immediately retrieve full device status
+- Temporarily set `POWER_THRESHOLD_W = 0` for testing (will return to 5W after validation)
+- Expanded monitoring from channel [2] to all channels [0,1,2,3]
+
 **2025-10-08**: Fixed critical bug in `fill_missing_minutes()` where backfilled CSV rows were incorrectly using the newest telemetry values instead of historical data for intermediate minutes. Now correctly uses `state['last_data']` for gap-filling and only applies new readings to the current minute.
 
 # User Preferences
@@ -57,16 +63,19 @@ Preferred communication style: Simple, everyday language.
 - Direct writes ensure data durability without buffering complexity
 
 ## Message Processing Pipeline
-1. **WebSocket connection** maintained persistently with Shelly device
-2. **JSON-RPC message parsing** from `params.device_status.switch:{X}` structure
-3. **Threshold evaluation** to determine activity state
-4. **Minute-based rate limiting** with gap-filling logic
-5. **CSV append** with error handling for missing fields
+1. **WebSocket connection** accepted from Shelly device
+2. **RPC bootstrap commands** sent immediately to activate data flow:
+   - `NotifyStatus` with `enable: true` to start streaming
+   - `Shelly.GetStatus` to retrieve immediate status dump
+3. **JSON-RPC message parsing** from `params.device_status.switch:{X}` structure
+4. **Threshold evaluation** to determine activity state
+5. **Minute-based rate limiting** with gap-filling logic
+6. **CSV append** with error handling for missing fields
 
 ## Configuration
 **Top-level constants** for easy customization:
-- `CHANNELS = [2]` - Which switch channels to monitor
-- `POWER_THRESHOLD_W = 5` - Activity threshold in watts
+- `CHANNELS = [0, 1, 2, 3]` - Which switch channels to monitor
+- `POWER_THRESHOLD_W = 0` - Activity threshold in watts (currently 0 for testing, normally 5)
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 - `CSV_FILE = "shelly_ws_log.csv"` - Output file path
 
