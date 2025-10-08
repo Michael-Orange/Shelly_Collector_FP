@@ -1,0 +1,29 @@
+Contraintes et attentes:
+Hébergement: Replit (nouvelle interface). Le serveur doit pouvoir tourner avec uvicorn.
+Protocole: WebSocket accessible sur l’URL publique du Repl, endpoint /ws (ex: wss://<mon-repl>.<mon-user>.repl.co/ws).
+Côté Shelly: j’activerai “Settings > Connectivity > Outbound Websocket”, puis je mettrai l’URL ci-dessus en “Server address”. Je veux que le serveur accepte la connexion et reçoive les messages JSON que le Shelly envoie (format RPC/NotifyStatus).
+Données à extraire: pour chaque message reçu, lire params.device_status.switch:{0,1,2,3} quand ils existent. Pour chaque switch:X, extraire au minimum:
+apower (W)
+voltage (V)
+current (A)
+aenergy.total (Wh)
+ainsi que l’identifiant du device (id)
+Écriture CSV:
+Créer un fichier shelly_ws_log.csv s’il n’existe pas, avec l’entête: timestamp_iso, device_id, channel, apower_W, voltage_V, current_A, energy_total_Wh
+Écrire au maximum une ligne par minute et par canal (limiteur de fréquence). Le timestamp peut être en UTC (ISO 8601).
+Robustesse:
+Le serveur doit accepter et garder ouverte la connexion WebSocket, consommer les messages à l’infini, et logguer en continu.
+En cas de champs manquants, écrire des valeurs nulles/vides au lieu de planter.
+Démarrage:
+Je veux pouvoir lancer avec: pip install fastapi uvicorn websockets puis uvicorn main:app --host 0.0.0.0 --port 8000
+Une route GET / (HTTP) peut répondre “Shelly WS collector running” pour tester rapidement que le service est up.
+Sécurité/SSL:
+Idéalement en wss:// (cert de Replit). Si nécessaire, pouvoir tester en ws://.
+Objectif final:
+Minimiser l’impact côté Shelly (connexion sortante persistante, pas de polling).
+Obtenir un fichier CSV avec une granularité d’une minute par canal, à partir de maintenant, de façon continue.
+Merci de me livrer:
+Un fichier main.py complet prêt à coller.
+Les commandes à exécuter dans la console Replit pour installer et lancer.
+L’URL exacte du endpoint WS à configurer côté Shelly (je remplacerai par mon URL Replit).
+Éventuellement un message de log en console à chaque écriture (pour vérifier le flux).

@@ -1,0 +1,36 @@
+Détails fonctionnels
+Endpoint HTTP GET / qui répond “Shelly WS collector running” pour vérifier que le service est en ligne.
+Endpoint WebSocket /ws (URL finale: wss://MON_REPL.MON_USER.repl.co/ws).
+À chaque message reçu du Shelly (format JSON RPC NotifyStatus), lire dans params.device_status les canaux switch:{0,1,2,3}.
+Pour chaque canal suivi (par défaut switch:2, mais la solution doit permettre de configurer une liste comme [0,1,2,3] ou [2] uniquement):
+Récupérer apower (W), voltage (V), current (A), aenergy.total (Wh), ainsi que l’id du device.
+Seuil d’activité configurable POWER_THRESHOLD_W (par défaut 5 W).
+Quand apower passe de ≤ seuil → > seuil, considérer “début d’activité”.
+Tant que apower reste > seuil, écrire au plus UNE LIGNE PAR MINUTE:
+Remplir toutes les minutes manquantes entre la dernière minute écrite et la minute courante (pour garantir 1 ligne/minute pendant la période active), en utilisant la dernière valeur connue.
+Quand apower repasse à ≤ seuil, considérer “fin d’activité” et ne plus écrire jusqu’au prochain démarrage.
+Timestamp en UTC au format ISO 8601 (ex: 2025-10-08T20:45:00Z).
+Fichier CSV: shelly_ws_log.csv, créé s’il n’existe pas, avec en-têtes:
+timestamp_iso, device_id, channel, apower_W, voltage_V, current_A, energy_total_Wh
+Tolérant aux champs manquants (ne doit pas planter si une clé est absente).
+Log console utile: afficher quand une ligne est écrite (ex: “Logged device_id switch:2 at 2025-10-08 20:46”).
+Mise en place souhaitée (pour que je n’aie qu’à suivre)
+Dans le Shell Replit:
+pip install fastapi uvicorn websockets
+Un fichier main.py prêt à coller contenant toute la logique ci-dessus, avec 3 paramètres facilement modifiables en haut:
+CHANNELS = [2] (je veux suivre surtout switch:2, mais que je puisse mettre [0,1,2,3] si besoin)
+POWER_THRESHOLD_W = 5
+WRITE_TZ = "UTC" (si possible, conserver UTC; pas d’exigence de fuseau local)
+Commande de lancement:
+uvicorn main:app --host 0.0.0.0 --port 8000
+Je collerai ensuite l’URL WebSocket côté Shelly:
+wss://MON_REPL.MON_USER.repl.co/ws
+Si besoin de tests, accepter aussi ws:// (non chiffré).
+Le Shelly est déjà accessible via Cloud; je peux activer “Outbound Websocket” à distance et mettre l’URL. Je veux voir “Device is connected” côté Shelly et, côté Replit, “WS: client connected”, puis le CSV se remplir (une ligne par minute pendant l’activité).
+But final
+Obtenir un CSV propre, minute par minute, uniquement pendant les périodes ON (pompe), sans bruit quand c’est OFF.
+Solution simple, stable, avec le moins d’impact possible sur le Shelly (connexion sortante persistante, pas de polling).
+Merci de me fournir:
+main.py complet (prêt à coller)
+Les commandes d’installation/lancement (voir ci-dessus)
+Toute indication si Replit nécessite un réglage particulier (ex: Always On) pour rester actif en continu.
