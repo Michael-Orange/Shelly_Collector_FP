@@ -130,6 +130,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
+            print("RAW:", data)
             
             try:
                 message = json.loads(data)
