@@ -12,12 +12,12 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 - Resolved Autoscale persistence issue where CSV files were lost on instance restart
 - All data now persists reliably in managed PostgreSQL database (free tier)
 - Removed debug logs (RAW messages) to reduce noise
+- Set `POWER_THRESHOLD_W = 5W` for production (only logs activity above 5W)
 
 **2025-10-08**: Added RPC bootstrap commands to actively request data from Shelly upon WebSocket connection:
 - `NotifyStatus` with `{"enable": true}` to activate streaming notifications
 - `Shelly.GetStatus` to immediately retrieve full device status
 - Fixed JSON parsing to support both flat (`params.switch:X`) and nested (`params.device_status.switch:X`) formats
-- Temporarily set `POWER_THRESHOLD_W = 0` for testing (will return to 5W after validation)
 - Expanded monitoring from channel [2] to all channels [0,1,2,3]
 
 **2025-10-08**: Fixed critical bug in `fill_missing_minutes()` where backfilled rows were incorrectly using the newest telemetry values instead of historical data for intermediate minutes.
@@ -84,7 +84,7 @@ Preferred communication style: Simple, everyday language.
 ## Configuration
 **Top-level constants** for easy customization:
 - `CHANNELS = [0, 1, 2, 3]` - Which switch channels to monitor
-- `POWER_THRESHOLD_W = 0` - Activity threshold in watts (currently 0 for testing, normally 5)
+- `POWER_THRESHOLD_W = 5` - Activity threshold in watts (only logs when power > 5W)
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 
 **Environment variables** (auto-configured by Replit):

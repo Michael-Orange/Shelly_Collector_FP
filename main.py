@@ -8,7 +8,7 @@ import asyncio
 import asyncpg
 
 CHANNELS = [0, 1, 2, 3]
-POWER_THRESHOLD_W = 0
+POWER_THRESHOLD_W = 5
 WRITE_TZ = "UTC"
 
 app = FastAPI()
