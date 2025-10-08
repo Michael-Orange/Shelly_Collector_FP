@@ -45,13 +45,16 @@ def write_csv_line(device_id: str, channel: int, timestamp: datetime, data: Dict
     except Exception as e:
         print(f"Error writing to CSV: {e}")
 
-def fill_missing_minutes(device_id: str, channel: int, last_written: datetime, current: datetime, data: Dict):
+def fill_missing_minutes(device_id: str, channel: int, last_written: datetime, current: datetime, old_data: Dict, new_data: Dict):
     current_minute = last_written.replace(second=0, microsecond=0)
     target_minute = current.replace(second=0, microsecond=0)
     
     while current_minute < target_minute:
         current_minute = datetime.fromtimestamp(current_minute.timestamp() + 60, tz=timezone.utc)
-        write_csv_line(device_id, channel, current_minute, data)
+        if current_minute < target_minute:
+            write_csv_line(device_id, channel, current_minute, old_data)
+        else:
+            write_csv_line(device_id, channel, current_minute, new_data)
 
 def process_shelly_message(message: Dict, device_id: str):
     try:
@@ -93,7 +96,7 @@ def process_shelly_message(message: Dict, device_id: str):
             elif was_active and is_active:
                 if state['last_written'] is None or state['last_written'] < current_time:
                     if state['last_written']:
-                        fill_missing_minutes(device_id, channel, state['last_written'], current_time, switch_data)
+                        fill_missing_minutes(device_id, channel, state['last_written'], current_time, state['last_data'], switch_data)
                     else:
                         write_csv_line(device_id, channel, current_time, switch_data)
                     state['last_written'] = current_time
