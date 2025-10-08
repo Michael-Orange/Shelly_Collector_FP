@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import asyncio
 
 CHANNELS = [0, 1, 2, 3]
-POWER_THRESHOLD_W = 5
+POWER_THRESHOLD_W = 0
 WRITE_TZ = "UTC"
 
 CSV_FILE = "shelly_ws_log.csv"
@@ -120,6 +120,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     device_id = "unknown"
     print("WS: client connected")
+    
+    try:
+        await websocket.send_text('{"id":1,"src":"collector","method":"NotifyStatus","params":{"enable":true}}')
+        await websocket.send_text('{"id":2,"src":"collector","method":"Shelly.GetStatus"}')
+    except Exception as e:
+        print(f"Failed to send initial RPC: {e}")
     
     try:
         while True:
