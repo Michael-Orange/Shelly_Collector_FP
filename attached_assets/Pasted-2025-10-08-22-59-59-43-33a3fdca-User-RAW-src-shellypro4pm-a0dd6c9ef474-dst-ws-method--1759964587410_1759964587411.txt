@@ -1,0 +1,128 @@
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyFullStatus","params":{"ts":1759964297.75,"ble":{},"bthome":{"errors":["bluetooth_disabled"]},"cloud":{"connected":false},"eth":{"ip":null,"ip6":null},"input:0":{"id":0,"state":false},"input:1":{"id":1,"state":false},"input:2":{"id":2,"state":false},"input:3":{"id":3,"state":false},"knx":{},"mqtt":{"connected":false},"switch:0":{"id":0, "source":"init", "output":false, "apower":0.0, "voltage":228.4, "freq":50.0, "current":0.000, "pf":0.00, "aenergy":{"total":14.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:1":{"id":1, "source":"init", "output":true, "apower":0.0, "voltage":228.3, "freq":50.0, "current":0.000, "pf":0.00, "aenergy":{"total":369.368,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:2":{"id":2, "source":"init", "output":true, "apower":428.3, "voltage":228.5, "freq":50.0, "current":2.457, "pf":0.80, "aenergy":{"total":2828.474,"by_minute":[7161.568,7514.251,7510.333],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:3":{"id":3, "source":"init", "output":true, "apower":1.1, "voltage":228.4, "freq":50.0, "current":0.059, "pf":0.09, "aenergy":{"total":628.810,"by_minute":[18.627,19.774,19.638],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"sys":{"mac":"A0DD6C9EF474","restart_required":false,"time":"22:58","unixtime":1759964297,"last_sync_ts":1759964295,"uptime":9,"ram_size":245212,"ram_free":85232,"ram_min_free":76568,"fs_size":524288,"fs_free":188416,"cfg_rev":22,"kvs_rev":0,"schedule_rev":25,"webhook_rev":0,"btrelay_rev":0,"bthc_rev":0,"available_updates":{},"reset_reason":3,"utc_offset":0},"ui":{},"wifi":{"sta_ip":"192.168.1.35","status":"got ip","ssid":"PLF_Mbao_SGMCM_SN","bssid":"78:90:a2:1f:81:cf","rssi":-61,"sta_ip6":["fe80::a2dd:6cff:fe9e:f474","2001:4278:11:966c:a2dd:6cff:fe9e:f474"]},"ws":{"connected":true}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"id":1,"src":"shellypro4pm-a0dd6c9ef474","dst":"collector","error":{"code":404,"message":"No handler for NotifyStatus"}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"id":2,"src":"shellypro4pm-a0dd6c9ef474","dst":"collector","result":{"ble":{},"bthome":{"errors":["bluetooth_disabled"]},"cloud":{"connected":false},"eth":{"ip":null,"ip6":null},"input:0":{"id":0,"state":false},"input:1":{"id":1,"state":false},"input:2":{"id":2,"state":false},"input:3":{"id":3,"state":false},"knx":{},"mqtt":{"connected":false},"switch:0":{"id":0, "source":"init", "output":false, "apower":0.0, "voltage":228.4, "freq":50.0, "current":0.000, "pf":0.00, "aenergy":{"total":14.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:1":{"id":1, "source":"init", "output":true, "apower":0.0, "voltage":228.3, "freq":50.0, "current":0.000, "pf":0.00, "aenergy":{"total":369.368,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:2":{"id":2, "source":"init", "output":true, "apower":428.3, "voltage":228.5, "freq":50.0, "current":2.457, "pf":0.80, "aenergy":{"total":2828.474,"by_minute":[7161.568,7514.251,7510.333],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"switch:3":{"id":3, "source":"init", "output":true, "apower":1.1, "voltage":228.4, "freq":50.0, "current":0.059, "pf":0.09, "aenergy":{"total":628.810,"by_minute":[18.627,19.774,19.638],"minute_ts":1759964280}, "ret_aenergy":{"total":0.000,"by_minute":[0.000,0.000,0.000],"minute_ts":1759964280},"temperature":{"tC":51.4, "tF":124.6}},"sys":{"mac":"A0DD6C9EF474","restart_required":false,"time":"22:58","unixtime":1759964297,"last_sync_ts":1759964295,"uptime":9,"ram_size":245140,"ram_free":81244,"ram_min_free":76028,"fs_size":524288,"fs_free":188416,"cfg_rev":22,"kvs_rev":0,"schedule_rev":25,"webhook_rev":0,"btrelay_rev":0,"bthc_rev":0,"available_updates":{},"reset_reason":3,"utc_offset":0},"ui":{},"wifi":{"sta_ip":"192.168.1.35","status":"got ip","ssid":"PLF_Mbao_SGMCM_SN","bssid":"78:90:a2:1f:81:cf","rssi":-62,"sta_ip6":["fe80::a2dd:6cff:fe9e:f474","2001:4278:11:966c:a2dd:6cff:fe9e:f474"]},"ws":{"connected":true}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964297.77,"ws":{"connected":true}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964297.91,"cloud":{"connected":true}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964301.34,"switch:3":{"apower":1.2,"current":0.058}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Activity started: shellypro4pm-a0dd6c9ef474 switch:3 (power: 1.2W)
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Logged shellypro4pm-a0dd6c9ef474 switch:3 at 2025-10-08 22:58
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964316.10,"switch:2":{"apower":0,"current":0,"output":false,"pf":0,"source":"SHC"}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964318.42,"switch:2":{"output":true,"source":"SHC"}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964319.33,"switch:2":{"apower":433.8,"current":2.631}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Activity started: shellypro4pm-a0dd6c9ef474 switch:2 (power: 433.8W)
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Logged shellypro4pm-a0dd6c9ef474 switch:2 at 2025-10-08 22:58
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964326.33,"switch:2":{"current":2.474}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Activity ended: shellypro4pm-a0dd6c9ef474 switch:2 (power: 0W)
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964340.00,"switch:0":{"aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":14.000},"apower":0.0,"aprtpower":0.0,"current":0.000,"freq":50.00,"pf":0.0,"ret_aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":0.000},"voltage":228.2}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964340.00,"switch:2":{"aenergy":{"by_minute":[7035.312,7161.568,7514.251],"minute_ts":1759964340,"total":2833.608},"apower":438.0,"aprtpower":438.0,"current":2.513,"freq":50.00,"pf":0.8,"ret_aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":0.000},"voltage":228.2}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Activity started: shellypro4pm-a0dd6c9ef474 switch:2 (power: 438.0W)
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Logged shellypro4pm-a0dd6c9ef474 switch:2 at 2025-10-08 22:59
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964340.00,"switch:3":{"aenergy":{"by_minute":[18.401,18.627,19.774],"minute_ts":1759964340,"total":628.823},"apower":1.1,"aprtpower":1.1,"current":0.059,"freq":50.00,"pf":0.1,"ret_aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":0.000},"voltage":228.2}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+Logged shellypro4pm-a0dd6c9ef474 switch:3 at 2025-10-08 22:59
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964340.01,"switch:1":{"aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":369.368},"apower":0.0,"aprtpower":0.0,"current":0.000,"freq":50.00,"pf":0.0,"ret_aenergy":{"by_minute":[0.000,0.000,0.000],"minute_ts":1759964340,"total":0.000},"voltage":228.1}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964341.33,"switch:3":{"apower":1.3,"current":0.057}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964392.32,"switch:3":{"apower":1.0,"current":0.058}}}
+2025-10-08 22:59:59.43
+33a3fdca
+User
+RAW: {"src":"shellypro4pm-a0dd6c9ef474","dst":"ws","method":"NotifyStatus","params":{"ts":1759964398.32,"switch:3":{"apower":1.2,"current":0.060}}}
+2025-10-08 23:00:33.30
+f71261e9
+System
+system: received signal terminated
+2025-10-08 23:00:33.34
+f71261e9
+User
+INFO: Shutting down
+2025-10-08 23:00:33.44
+f71261e9
+User
+INFO: Waiting for application shutdown.
+2025-10-08 23:00:33.44
+f71261e9
+User
+INFO: Application shutdown complete.
+2025-10-08 23:00:33.44
+f71261e9
+User
+INFO: Finished server process [20]
+2025-10-08 23:00:33.45
+f71261e9
+System
+command finished with error [uvicorn main:app --host 0.0.0.0 --port 5000]: signal: terminated
+2025-10-08 23:00:33.46
+f71261e9
+System
+main done, exiting
