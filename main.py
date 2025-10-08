@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import asyncio
 
-CHANNELS = [2]
+CHANNELS = [0, 1, 2, 3]
 POWER_THRESHOLD_W = 5
 WRITE_TZ = "UTC"
 
