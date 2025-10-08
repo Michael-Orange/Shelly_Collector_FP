@@ -62,11 +62,12 @@ def process_shelly_message(message: Dict, device_id: str):
             return
         
         params = message.get('params', {})
-        device_status = params.get('device_status', {})
         
         for channel in CHANNELS:
             switch_key = f"switch:{channel}"
-            switch_data = device_status.get(switch_key)
+            switch_data = params.get(switch_key)
+            if not switch_data:
+                switch_data = params.get('device_status', {}).get(switch_key)
             
             if not switch_data:
                 continue
