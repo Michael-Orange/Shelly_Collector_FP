@@ -12,6 +12,12 @@ POWER_THRESHOLD_W = 10
 POWER_DELTA_MIN_W = 10
 WRITE_TZ = "UTC"
 
+SAMPLE_INTERVALS = {
+    0: 3,
+    1: 3,
+    2: 20
+}
+
 app = FastAPI()
 
 channel_states: Dict[str, Dict] = {}
@@ -20,7 +26,14 @@ db_pool: Optional[asyncpg.Pool] = None
 def get_current_minute():
     return datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
-async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, voltage: float, current: float, energy_total: float):
+def is_sample_minute(channel: int, timestamp: datetime) -> bool:
+    """Determine if this minute is a sampling point for the given channel"""
+    interval = SAMPLE_INTERVALS.get(channel, 0)
+    if interval == 0:
+        return False
+    return timestamp.minute % interval == 0
+
+async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, voltage: float, current: float, energy_total: float, reason: str = ""):
     if not db_pool:
         print("ERROR: Database pool not initialized")
         return
@@ -38,7 +51,8 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower
                 current,
                 energy_total
             )
-        print(f"DB: {device_id} ch:{channel} {apower}W @ {timestamp.strftime('%H:%M')}")
+        reason_str = f" ({reason})" if reason else ""
+        print(f"DB: {device_id} ch:{channel} {apower}W @ {timestamp.strftime('%H:%M')}{reason_str}")
     except Exception as e:
         print(f"Error writing to DB: {e}")
 
@@ -80,25 +94,37 @@ async def process_shelly_message(message: Dict, device_id: str):
             
             # Transition OFF → ON (start activity)
             if not was_active and is_active:
-                await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total)
+                await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "start")
                 state['active'] = True
                 state['last_written'] = current_time
                 state['last_written_power'] = apower
             
             # Transition ON → ON (during activity)
             elif was_active and is_active:
-                # Only write if we're in a new minute AND delta >= threshold
+                # Only write if we're in a new minute
                 if state['last_written'] is None or state['last_written'] < current_time:
+                    written = False
                     power_delta = abs(apower - state['last_written_power'])
+                    
+                    # Check if delta exceeds threshold
                     if power_delta >= POWER_DELTA_MIN_W:
-                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total)
+                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "delta")
                         state['last_written_power'] = apower
+                        written = True
+                    
+                    # Check if this is a sample minute (only if not already written)
+                    elif is_sample_minute(channel, current_time):
+                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "sample")
+                        state['last_written_power'] = apower
+                        written = True
+                    
+                    # Always update last_written to mark this minute as processed
                     state['last_written'] = current_time
             
             # Transition ON → OFF (end activity)
             elif was_active and not is_active:
                 # Force write with 0W to close the activity period
-                await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total)
+                await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
                 state['active'] = False
                 state['last_written'] = None
                 state['last_written_power'] = 0
@@ -157,6 +183,7 @@ async def startup_event():
     print(f"Monitoring channels: {CHANNELS}")
     print(f"Power threshold: {POWER_THRESHOLD_W}W")
     print(f"Power delta (during activity): {POWER_DELTA_MIN_W}W")
+    print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min")
     print("Database: PostgreSQL connected")
 
 @app.on_event("shutdown")
