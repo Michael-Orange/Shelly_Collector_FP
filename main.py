@@ -8,7 +8,8 @@ import asyncio
 import asyncpg
 
 CHANNELS = [0, 1, 2]
-POWER_THRESHOLD_W = 5
+POWER_THRESHOLD_W = 10
+POWER_DELTA_MIN_W = 10
 WRITE_TZ = "UTC"
 
 app = FastAPI()
@@ -19,7 +20,7 @@ db_pool: Optional[asyncpg.Pool] = None
 def get_current_minute():
     return datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
-async def write_db_row(device_id: str, channel: int, timestamp: datetime, data: Dict):
+async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, voltage: float, current: float, energy_total: float):
     if not db_pool:
         print("ERROR: Database pool not initialized")
         return
@@ -32,25 +33,14 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, data: 
                 timestamp,
                 device_id,
                 f"switch:{channel}",
-                data.get('apower', 0),
-                data.get('voltage', 0),
-                data.get('current', 0),
-                data.get('aenergy', {}).get('total', 0)
+                apower,
+                voltage,
+                current,
+                energy_total
             )
-        print(f"Logged {device_id} switch:{channel} at {timestamp.strftime('%Y-%m-%d %H:%M')}")
+        print(f"DB: {device_id} ch:{channel} {apower}W @ {timestamp.strftime('%H:%M')}")
     except Exception as e:
         print(f"Error writing to DB: {e}")
-
-async def fill_missing_minutes(device_id: str, channel: int, last_written: datetime, current: datetime, old_data: Dict, new_data: Dict):
-    current_minute = last_written.replace(second=0, microsecond=0)
-    target_minute = current.replace(second=0, microsecond=0)
-    
-    while current_minute < target_minute:
-        current_minute = datetime.fromtimestamp(current_minute.timestamp() + 60, tz=timezone.utc)
-        if current_minute < target_minute:
-            await write_db_row(device_id, channel, current_minute, old_data)
-        else:
-            await write_db_row(device_id, channel, current_minute, new_data)
 
 async def process_shelly_message(message: Dict, device_id: str):
     try:
@@ -69,41 +59,51 @@ async def process_shelly_message(message: Dict, device_id: str):
                 continue
             
             apower = switch_data.get('apower', 0)
+            voltage = switch_data.get('voltage', 0)
+            current = switch_data.get('current', 0)
+            energy_total = switch_data.get('aenergy', {}).get('total', 0)
+            
             current_time = get_current_minute()
             state_key = f"{device_id}_{channel}"
             
+            # Initialize state if needed
             if state_key not in channel_states:
                 channel_states[state_key] = {
                     'active': False,
                     'last_written': None,
-                    'last_data': {}
+                    'last_written_power': 0
                 }
             
             state = channel_states[state_key]
             was_active = state['active']
             is_active = apower > POWER_THRESHOLD_W
             
+            # Transition OFF → ON (start activity)
             if not was_active and is_active:
-                print(f"Activity started: {device_id} switch:{channel} (power: {apower}W)")
+                await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total)
                 state['active'] = True
-                state['last_data'] = switch_data
-                await write_db_row(device_id, channel, current_time, switch_data)
                 state['last_written'] = current_time
+                state['last_written_power'] = apower
             
+            # Transition ON → ON (during activity)
             elif was_active and is_active:
+                # Only write if we're in a new minute AND delta >= threshold
                 if state['last_written'] is None or state['last_written'] < current_time:
-                    if state['last_written']:
-                        await fill_missing_minutes(device_id, channel, state['last_written'], current_time, state['last_data'], switch_data)
-                    else:
-                        await write_db_row(device_id, channel, current_time, switch_data)
-                    state['last_written'] = current_time
-                state['last_data'] = switch_data
+                    power_delta = abs(apower - state['last_written_power'])
+                    if power_delta >= POWER_DELTA_MIN_W:
+                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total)
+                        state['last_written'] = current_time
+                        state['last_written_power'] = apower
             
+            # Transition ON → OFF (end activity)
             elif was_active and not is_active:
-                print(f"Activity ended: {device_id} switch:{channel} (power: {apower}W)")
+                # Force write with 0W to close the activity period
+                await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total)
                 state['active'] = False
-                state['last_data'] = {}
                 state['last_written'] = None
+                state['last_written_power'] = 0
+            
+            # Transition OFF → OFF: do nothing
                 
     except Exception as e:
         print(f"Error processing message: {e}")
@@ -116,7 +116,6 @@ async def root():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     device_id = "unknown"
-    print("WS: client connected")
     
     try:
         await websocket.send_text('{"id":1,"src":"collector","method":"NotifyStatus","params":{"enable":true}}')
@@ -140,7 +139,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"Invalid JSON received: {e}")
                 
     except WebSocketDisconnect:
-        print(f"WS: client disconnected ({device_id})")
+        print(f"WS disconnected: {device_id}")
     except Exception as e:
         print(f"WebSocket error: {e}")
 
@@ -157,6 +156,7 @@ async def startup_event():
     print("Shelly WS collector started")
     print(f"Monitoring channels: {CHANNELS}")
     print(f"Power threshold: {POWER_THRESHOLD_W}W")
+    print(f"Power delta (during activity): {POWER_DELTA_MIN_W}W")
     print("Database: PostgreSQL connected")
 
 @app.on_event("shutdown")
