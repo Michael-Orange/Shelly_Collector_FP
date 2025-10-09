@@ -6,7 +6,14 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-09 (Latest)**: Major optimization to reduce database write volume:
+**2025-10-09 (Latest)**: Added periodic sampling for baseline tracking:
+- Implemented periodic sampling during activity (ON state) for reference points
+- Sampling intervals: channels 0/1 every 3 minutes, channel 2 every 20 minutes
+- Samples only written if no other write occurred in that minute (anti-duplication)
+- Enhanced logging with write reasons (start/delta/sample/stop) for debugging
+- Result: Maintains low write volume while ensuring regular baseline data points
+
+**2025-10-09**: Major optimization to reduce database write volume:
 - Implemented intelligent delta-based filtering with `POWER_DELTA_MIN_W = 10W`
 - New transition logic: OFF→ON (forced write), ON→ON (write only if Δ≥10W), ON→OFF (forced write @ 0W)
 - Increased activity threshold to `POWER_THRESHOLD_W = 10W` (from 5W)
@@ -45,17 +52,21 @@ Preferred communication style: Simple, everyday language.
 ## Data Collection Strategy
 **Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes.
 
-**Solution**: Delta-based intelligent logging with dual thresholds
+**Solution**: Delta-based intelligent logging with dual thresholds + periodic sampling
 - **Activity threshold** (`POWER_THRESHOLD_W = 10W`): Determines OFF/ON state transitions
 - **Delta threshold** (`POWER_DELTA_MIN_W = 10W`): Filters writes during activity (ON→ON)
 - **Transition rules**:
   - **OFF→ON**: Force write (activity start)
-  - **ON→ON**: Write only if |Δpower| ≥ 10W AND new minute
+  - **ON→ON**: Write if |Δpower| ≥ 10W OR periodic sample minute
   - **ON→OFF**: Force write @ 0W (activity end)
   - **OFF→OFF**: No write
+- **Periodic sampling** (during ON state only):
+  - Channels 0 & 1: every 3 minutes (at :00, :03, :06, :09, etc.)
+  - Channel 2: every 20 minutes (at :00, :20, :40)
+  - Samples only written if no other write in that minute (anti-duplication)
 - Maximum one entry per minute per channel
 
-**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, and significant power variations. Example: 0W→450W→449W→451W→0W logs only start (≈450W) and end (0W), not intermediate ±1W noise.
+**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, significant power variations, AND regular baseline samples for trend analysis. Example: 0W→450W→449W→451W→0W logs start (≈450W) and end (0W), plus periodic samples if interval aligns.
 
 ## State Management
 **In-memory channel state tracking** using Python dictionaries:
@@ -90,9 +101,10 @@ Preferred communication style: Simple, everyday language.
    - `Shelly.GetStatus` to retrieve immediate status dump
 3. **JSON-RPC message parsing** from `params.switch:{X}` or `params.device_status.switch:{X}` (dual lookup)
 4. **State transition detection** (OFF→ON, ON→ON, ON→OFF, OFF→OFF)
-5. **Delta-based write filtering**:
+5. **Delta-based write filtering with periodic sampling**:
    - Transitions (OFF↔ON): Always write
-   - During activity (ON→ON): Write only if |Δpower| ≥ 10W
+   - During activity (ON→ON): Write if |Δpower| ≥ 10W OR periodic sample minute
+   - Anti-duplication: max 1 write per minute per channel
 6. **PostgreSQL insert** with async connection pooling and error handling
 
 ## Configuration
@@ -100,6 +112,7 @@ Preferred communication style: Simple, everyday language.
 - `CHANNELS = [0, 1, 2]` - Which switch channels to monitor
 - `POWER_THRESHOLD_W = 10` - Activity threshold in watts (OFF/ON state boundary)
 - `POWER_DELTA_MIN_W = 10` - Minimum power variation to log during activity (ON→ON filtering)
+- `SAMPLE_INTERVALS = {0: 3, 1: 3, 2: 20}` - Periodic sampling intervals in minutes per channel
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 
 **Environment variables** (auto-configured by Replit):
