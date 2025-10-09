@@ -1,0 +1,35 @@
+Objectif
+Conserver la logique économe actuelle (transitions ON/OFF + variations significatives ≥ 10 W).
+Ajouter un échantillonnage périodique très limité pendant l’activité pour disposer de points “référence”.
+À mettre en place
+Règles existantes (inchangées)
+OFF/ON: POWER_THRESHOLD_W = 10 W.
+Pendant l’activité (ON):
+Au plus 1 écriture par minute et par canal.
+Écriture si variation ≥ POWER_DELTA_MIN_W (= 10 W).
+Transitions forcées:
+OFF → ON: forcer écriture (minute courante).
+ON → OFF: forcer écriture à 0 W (minute courante).
+OFF → OFF: aucune écriture.
+Nouvelle règle “échantillonnage périodique” (en plus)
+S’applique uniquement si la pompe est ON (apower > 10 W).
+Fréquences par canal:
+Channel 0: forcer une écriture toutes les 3 minutes.
+Channel 1: forcer une écriture toutes les 3 minutes.
+Channel 2: forcer une écriture toutes les 20 minutes.
+Anti‑doublon:
+Si une écriture a déjà eu lieu dans la minute (transition ou variation), ne pas ajouter de “sample” la même minute.
+Si une variation ≥ 10 W survient la même minute qu’un “sample” programmé, on ne fait qu’une seule écriture (celle survenant en dernier pour refléter l’état final).
+Calendrier d’échantillonnage (basé sur minute UTC)
+ch0/ch1: minutes multiples de 3 (hh:00, :03, :06, …) si ON et pas encore écrit dans cette minute.
+ch2: minutes multiples de 20 (hh:00, :20, :40) si ON et pas encore écrit dans cette minute.
+Si la session ON commence à hh:01, la première minute “sample”:
+ch0/ch1: hh:03
+ch2: hh:20
+Logs et optimisation
+Ne logger que les insertions effectives (éviter le bruit).
+Déployer (Publish/Update) et confirmer.
+Résultat attendu
+ch0 et ch1: en plus des transitions et variations ≥ 10 W, un “sample” toutes les 3 minutes pendant l’activité.
+ch2: en plus des transitions et variations ≥ 10 W, un “sample” toutes les 20 minutes pendant l’activité.
+Aucun doublon intra‑minute; volume maîtrisé mais suffisamment de points réguliers pour suivre l’intensité et bâtir des baselines si besoin.
