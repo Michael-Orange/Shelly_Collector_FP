@@ -92,8 +92,8 @@ async def process_shelly_message(message: Dict, device_id: str):
                     power_delta = abs(apower - state['last_written_power'])
                     if power_delta >= POWER_DELTA_MIN_W:
                         await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total)
-                        state['last_written'] = current_time
                         state['last_written_power'] = apower
+                    state['last_written'] = current_time
             
             # Transition ON → OFF (end activity)
             elif was_active and not is_active:
