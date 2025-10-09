@@ -7,7 +7,7 @@ from typing import Dict, Optional
 import asyncio
 import asyncpg
 
-CHANNELS = [0, 1, 2, 3]
+CHANNELS = [0, 1, 2]
 POWER_THRESHOLD_W = 5
 WRITE_TZ = "UTC"
 

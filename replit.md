@@ -14,6 +14,8 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 - Removed debug logs (RAW messages) to reduce noise
 - Set `POWER_THRESHOLD_W = 5W` for production (only logs activity above 5W)
 
+**2025-10-09**: Adjusted monitored channels to [0, 1, 2] (removed channel 3)
+
 **2025-10-08**: Added RPC bootstrap commands to actively request data from Shelly upon WebSocket connection:
 - `NotifyStatus` with `{"enable": true}` to activate streaming notifications
 - `Shelly.GetStatus` to immediately retrieve full device status
@@ -83,7 +85,7 @@ Preferred communication style: Simple, everyday language.
 
 ## Configuration
 **Top-level constants** for easy customization:
-- `CHANNELS = [0, 1, 2, 3]` - Which switch channels to monitor
+- `CHANNELS = [0, 1, 2]` - Which switch channels to monitor
 - `POWER_THRESHOLD_W = 5` - Activity threshold in watts (only logs when power > 5W)
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 
