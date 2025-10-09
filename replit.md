@@ -6,7 +6,14 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-09 (Latest)**: Added periodic sampling for baseline tracking:
+**2025-10-09 (Latest)**: Added channel-specific hysteresis to prevent false stop detections:
+- Implemented 2-minute confirmation period for channel 2 (pump) before logging OFF state
+- Protects against erratic 0W sensor readings that were causing false stop/start cycles
+- Channels 0 & 1 remain unchanged with immediate stop detection (suitable for short-duration equipment ≤4min)
+- Tracks consecutive minutes below threshold per channel
+- Result: Eliminates spurious stop entries in database while preserving accurate pump cycle tracking
+
+**2025-10-09**: Added periodic sampling for baseline tracking:
 - Implemented periodic sampling during activity (ON state) for reference points
 - Sampling intervals: channels 0/1 every 3 minutes, channel 2 every 20 minutes
 - Samples only written if no other write occurred in that minute (anti-duplication)
@@ -50,15 +57,21 @@ Preferred communication style: Simple, everyday language.
 - HTTP health check endpoint at `/` returning plain text status
 
 ## Data Collection Strategy
-**Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes.
+**Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes. Additionally, Shelly sensors occasionally send erratic 0W readings during normal operation, causing false stop detections.
 
-**Solution**: Delta-based intelligent logging with dual thresholds + periodic sampling
+**Solution**: Delta-based intelligent logging with dual thresholds + periodic sampling + channel-specific hysteresis
 - **Activity threshold** (`POWER_THRESHOLD_W = 10W`): Determines OFF/ON state transitions
 - **Delta threshold** (`POWER_DELTA_MIN_W = 10W`): Filters writes during activity (ON→ON)
+- **Hysteresis protection** (`OFF_CONFIRMATION_MINUTES`): Channel-specific delay before confirming OFF state
+  - **Channel 2 (pump)**: Requires 2 consecutive minutes below threshold to confirm stop
+  - **Channels 0 & 1**: No delay, immediate stop detection (suitable for short cycles ≤4min)
+  - **Purpose**: Eliminates false stops from momentary 0W sensor glitches on long-running equipment
 - **Transition rules**:
   - **OFF→ON**: Force write (activity start)
   - **ON→ON**: Write if |Δpower| ≥ 10W OR periodic sample minute
-  - **ON→OFF**: Force write @ 0W (activity end)
+  - **ON→OFF**: 
+    - Channels 0/1: Immediate force write @ 0W (activity end)
+    - Channel 2: Force write @ 0W only after 2 consecutive minutes below threshold
   - **OFF→OFF**: No write
 - **Periodic sampling** (during ON state only):
   - Channels 0 & 1: every 3 minutes (at :00, :03, :06, :09, etc.)
@@ -66,7 +79,7 @@ Preferred communication style: Simple, everyday language.
   - Samples only written if no other write in that minute (anti-duplication)
 - Maximum one entry per minute per channel
 
-**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, significant power variations, AND regular baseline samples for trend analysis. Example: 0W→450W→449W→451W→0W logs start (≈450W) and end (0W), plus periodic samples if interval aligns.
+**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, significant power variations, AND regular baseline samples for trend analysis. The hysteresis protection prevents spurious stop/start cycles from sensor noise. Example: Pump running at 430W receives erratic 0W reading at 10:33, but continues at 435W at 10:34 → hysteresis prevents false stop entry, only real stops (2+ consecutive minutes at 0W) are logged.
 
 ## State Management
 **In-memory channel state tracking** using Python dictionaries:
@@ -113,6 +126,7 @@ Preferred communication style: Simple, everyday language.
 - `POWER_THRESHOLD_W = 10` - Activity threshold in watts (OFF/ON state boundary)
 - `POWER_DELTA_MIN_W = 10` - Minimum power variation to log during activity (ON→ON filtering)
 - `SAMPLE_INTERVALS = {0: 3, 1: 3, 2: 20}` - Periodic sampling intervals in minutes per channel
+- `OFF_CONFIRMATION_MINUTES = {2: 2}` - Channel-specific hysteresis: minutes of consecutive low power before confirming OFF (channel 2 only)
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 
 **Environment variables** (auto-configured by Replit):
