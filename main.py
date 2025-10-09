@@ -18,6 +18,12 @@ SAMPLE_INTERVALS = {
     2: 20
 }
 
+# Channel-specific hysteresis: minutes of consecutive low power before confirming OFF state
+# Only for channel 2 (pump) to prevent false stops from erratic 0W sensor readings
+OFF_CONFIRMATION_MINUTES = {
+    2: 2  # Channel 2 requires 2 consecutive minutes below threshold to confirm stop
+}
+
 app = FastAPI()
 
 channel_states: Dict[str, Dict] = {}
@@ -85,7 +91,8 @@ async def process_shelly_message(message: Dict, device_id: str):
                 channel_states[state_key] = {
                     'active': False,
                     'last_written': None,
-                    'last_written_power': 0
+                    'last_written_power': 0,
+                    'off_consecutive_minutes': 0
                 }
             
             state = channel_states[state_key]
@@ -98,9 +105,11 @@ async def process_shelly_message(message: Dict, device_id: str):
                 state['active'] = True
                 state['last_written'] = current_time
                 state['last_written_power'] = apower
+                state['off_consecutive_minutes'] = 0  # Reset hysteresis counter
             
             # Transition ON → ON (during activity)
             elif was_active and is_active:
+                state['off_consecutive_minutes'] = 0  # Reset hysteresis counter while active
                 # Only write if we're in a new minute
                 if state['last_written'] is None or state['last_written'] < current_time:
                     written = False
@@ -123,11 +132,31 @@ async def process_shelly_message(message: Dict, device_id: str):
             
             # Transition ON → OFF (end activity)
             elif was_active and not is_active:
-                # Force write with 0W to close the activity period
-                await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
-                state['active'] = False
-                state['last_written'] = None
-                state['last_written_power'] = 0
+                # Check if this channel has hysteresis configured
+                confirmation_required = OFF_CONFIRMATION_MINUTES.get(channel, 0)
+                
+                if confirmation_required > 0:
+                    # Channel has hysteresis (channel 2): require consecutive minutes below threshold
+                    # Only increment if we're in a new minute
+                    if state['last_written'] is None or state['last_written'] < current_time:
+                        state['off_consecutive_minutes'] += 1
+                        state['last_written'] = current_time
+                    
+                    # Check if we've reached confirmation threshold
+                    if state['off_consecutive_minutes'] >= confirmation_required:
+                        await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
+                        state['active'] = False
+                        state['last_written'] = None
+                        state['last_written_power'] = 0
+                        state['off_consecutive_minutes'] = 0
+                    # else: wait for more confirmation, stay in ON state
+                else:
+                    # No hysteresis (channels 0, 1): immediate stop
+                    await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
+                    state['active'] = False
+                    state['last_written'] = None
+                    state['last_written_power'] = 0
+                    state['off_consecutive_minutes'] = 0
             
             # Transition OFF → OFF: do nothing
                 
@@ -184,6 +213,7 @@ async def startup_event():
     print(f"Power threshold: {POWER_THRESHOLD_W}W")
     print(f"Power delta (during activity): {POWER_DELTA_MIN_W}W")
     print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min")
+    print(f"Hysteresis: ch2={OFF_CONFIRMATION_MINUTES.get(2, 0)}min confirmation for stop")
     print("Database: PostgreSQL connected")
 
 @app.on_event("shutdown")
