@@ -6,15 +6,21 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-08 (Latest)**: Migrated from CSV to PostgreSQL for data persistence:
+**2025-10-09 (Latest)**: Major optimization to reduce database write volume:
+- Implemented intelligent delta-based filtering with `POWER_DELTA_MIN_W = 10W`
+- New transition logic: OFF→ON (forced write), ON→ON (write only if Δ≥10W), ON→OFF (forced write @ 0W)
+- Increased activity threshold to `POWER_THRESHOLD_W = 10W` (from 5W)
+- Removed `fill_missing_minutes()` - no longer needed with delta filtering
+- Tracks `last_written_power` to calculate deltas during activity periods
+- Adjusted monitored channels to [0, 1, 2] (removed channel 3)
+- Result: Drastically reduced DB writes while preserving all critical events (starts, stops, significant variations)
+
+**2025-10-08**: Migrated from CSV to PostgreSQL for data persistence:
 - Created `power_logs` table with proper indexing (timestamp, device_id+channel)
 - Replaced CSV file writes with async PostgreSQL inserts using asyncpg
 - Resolved Autoscale persistence issue where CSV files were lost on instance restart
 - All data now persists reliably in managed PostgreSQL database (free tier)
 - Removed debug logs (RAW messages) to reduce noise
-- Set `POWER_THRESHOLD_W = 5W` for production (only logs activity above 5W)
-
-**2025-10-09**: Adjusted monitored channels to [0, 1, 2] (removed channel 3)
 
 **2025-10-08**: Added RPC bootstrap commands to actively request data from Shelly upon WebSocket connection:
 - `NotifyStatus` with `{"enable": true}` to activate streaming notifications
@@ -37,27 +43,31 @@ Preferred communication style: Simple, everyday language.
 - HTTP health check endpoint at `/` returning plain text status
 
 ## Data Collection Strategy
-**Problem**: Shelly devices send frequent status updates, but we only want minute-granularity data during active periods.
+**Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes.
 
-**Solution**: Smart activity-based logging with configurable power threshold
-- Monitor power consumption (`apower`) against configurable threshold (default: 5W)
-- Write maximum one entry per minute per channel
-- Only log when device is actively consuming power (above threshold)
-- Fill missing minutes during active periods to ensure continuity
+**Solution**: Delta-based intelligent logging with dual thresholds
+- **Activity threshold** (`POWER_THRESHOLD_W = 10W`): Determines OFF/ON state transitions
+- **Delta threshold** (`POWER_DELTA_MIN_W = 10W`): Filters writes during activity (ON→ON)
+- **Transition rules**:
+  - **OFF→ON**: Force write (activity start)
+  - **ON→ON**: Write only if |Δpower| ≥ 10W AND new minute
+  - **ON→OFF**: Force write @ 0W (activity end)
+  - **OFF→OFF**: No write
+- Maximum one entry per minute per channel
 
-**Rationale**: This approach minimizes storage and noise while preserving complete activity records. The minute-resolution provides sufficient granularity for power analysis without overwhelming detail.
+**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, and significant power variations. Example: 0W→450W→449W→451W→0W logs only start (≈450W) and end (0W), not intermediate ±1W noise.
 
 ## State Management
 **In-memory channel state tracking** using Python dictionaries:
 - Stores last written timestamp per device/channel combination
-- Tracks last known values for gap-filling
-- Maintains activity state (above/below threshold)
+- Tracks last written power value for delta calculations
+- Maintains activity state (OFF/ON based on threshold)
 
 **Trade-offs**: 
 - ✅ Simple implementation, no external dependencies
-- ✅ Fast lookups and updates
-- ⚠️ State lost on restart (acceptable for continuous logging use case)
-- ⚠️ Memory grows with number of unique device/channel combinations (minimal for typical deployments)
+- ✅ Fast lookups and delta calculations
+- ⚠️ State lost on restart (acceptable - next transition will reinitialize)
+- ⚠️ Memory grows with device/channel count (minimal for typical deployments)
 
 ## Data Storage
 **PostgreSQL database** (`power_logs` table)
@@ -79,14 +89,17 @@ Preferred communication style: Simple, everyday language.
    - `NotifyStatus` with `enable: true` to start streaming
    - `Shelly.GetStatus` to retrieve immediate status dump
 3. **JSON-RPC message parsing** from `params.switch:{X}` or `params.device_status.switch:{X}` (dual lookup)
-4. **Threshold evaluation** to determine activity state
-5. **Minute-based rate limiting** with gap-filling logic
+4. **State transition detection** (OFF→ON, ON→ON, ON→OFF, OFF→OFF)
+5. **Delta-based write filtering**:
+   - Transitions (OFF↔ON): Always write
+   - During activity (ON→ON): Write only if |Δpower| ≥ 10W
 6. **PostgreSQL insert** with async connection pooling and error handling
 
 ## Configuration
 **Top-level constants** for easy customization:
 - `CHANNELS = [0, 1, 2]` - Which switch channels to monitor
-- `POWER_THRESHOLD_W = 5` - Activity threshold in watts (only logs when power > 5W)
+- `POWER_THRESHOLD_W = 10` - Activity threshold in watts (OFF/ON state boundary)
+- `POWER_DELTA_MIN_W = 10` - Minimum power variation to log during activity (ON→ON filtering)
 - `WRITE_TZ = "UTC"` - Timezone for timestamps
 
 **Environment variables** (auto-configured by Replit):
