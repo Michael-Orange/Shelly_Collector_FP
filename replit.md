@@ -6,7 +6,13 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Added 4-layer protection system to eliminate ALL parasitic 0W writes:
+**2025-10-11 (Latest)**: Fixed critical race condition causing duplicate 0W writes:
+- **🔧 Protection 5 - asyncio.Lock**: Global lock serializes all stop write operations (prevents concurrent timer execution)
+- **🔧 Protection 3b - Enhanced anti-duplication**: Additional check for existing 0W entries in same minute (blocks any doublons)
+- **Problem solved**: Multiple timers expiring simultaneously were passing all checks in parallel before any wrote, creating duplicate 0W entries
+- **Result**: Zero duplicate stop entries - only ONE 0W per genuine stop event
+
+**2025-10-11**: Added 4-layer protection system to eliminate ALL parasitic 0W writes:
 - **🔧 Layer 1 - Security filter**: Server ignores any message with apower ≤10W (double-check after Cloudflare)
 - **🔧 Layer 2 - Conditional hysteresis**: Timer only writes 0W if last_written_power >10W (prevents stops on micro-activity)
 - **🔧 Layer 3 - Anti-duplication**: No 0W write if >10W entry already exists in same minute
