@@ -7,39 +7,41 @@ from typing import Dict, Optional
 import asyncio
 import asyncpg
 
-CHANNELS = [0, 1, 2]
-POWER_THRESHOLD_W = 10
-POWER_DELTA_MIN_W = 10
-WRITE_TZ = "UTC"
+# Configuration: Cloudflare prefilters messages (>10W, valid channels only)
+# Server receives only relevant messages - no threshold/channel checks needed
+POWER_DELTA_MIN_W = 10  # Minimum variation to log during activity
 
 SAMPLE_INTERVALS = {
-    0: 3,
-    1: 3,
-    2: 20
+    0: 5,   # Channel 0: sample every 5 minutes
+    1: 5,   # Channel 1: sample every 5 minutes
+    2: 20   # Channel 2: sample every 20 minutes
 }
 
-# Channel-specific hysteresis: minutes of consecutive low power before confirming OFF state
-# Only for channel 2 (pump) to prevent false stops from erratic 0W sensor readings
-OFF_CONFIRMATION_MINUTES = {
-    2: 2  # Channel 2 requires 2 consecutive minutes below threshold to confirm stop
+# Hysteresis: minutes without message before confirming stop
+STOP_TIMEOUT_MINUTES = {
+    0: 1,  # Channel 0: 1 minute without message → stop
+    1: 1,  # Channel 1: 1 minute without message → stop
+    2: 2   # Channel 2: 2 minutes without message → stop
 }
 
 app = FastAPI()
 
 channel_states: Dict[str, Dict] = {}
+stop_timers: Dict[str, Optional[asyncio.Task]] = {}
 db_pool: Optional[asyncpg.Pool] = None
 
 def get_current_minute():
     return datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
 def is_sample_minute(channel: int, timestamp: datetime) -> bool:
-    """Determine if this minute is a sampling point for the given channel"""
+    """Check if this minute is a sampling point for the given channel"""
     interval = SAMPLE_INTERVALS.get(channel, 0)
     if interval == 0:
         return False
     return timestamp.minute % interval == 0
 
-async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, voltage: float, current: float, energy_total: float, reason: str = ""):
+async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, 
+                       voltage: float, current: float, energy_total: float, reason: str = ""):
     if not db_pool:
         print("ERROR: Database pool not initialized")
         return
@@ -62,6 +64,31 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower
     except Exception as e:
         print(f"Error writing to DB: {e}")
 
+async def trigger_stop(device_id: str, channel: int, state_key: str):
+    """Callback when stop timer expires - no message received for X minutes"""
+    current_time = get_current_minute()
+    state = channel_states.get(state_key)
+    
+    if not state:
+        return
+    
+    # Write stop with last known telemetry values
+    await write_db_row(
+        device_id, 
+        channel, 
+        current_time, 
+        0,  # Power = 0W for stop
+        state.get('last_voltage', 0),
+        state.get('last_current', 0),
+        state.get('last_energy_total', 0),
+        "stop"
+    )
+    
+    # Reset state
+    state['last_written'] = None
+    state['last_written_power'] = 0
+    stop_timers[state_key] = None
+
 async def process_shelly_message(message: Dict, device_id: str):
     try:
         if message.get('method') != 'NotifyStatus':
@@ -69,12 +96,19 @@ async def process_shelly_message(message: Dict, device_id: str):
         
         params = message.get('params', {})
         
-        for channel in CHANNELS:
-            switch_key = f"switch:{channel}"
-            switch_data = params.get(switch_key)
-            if not switch_data:
-                switch_data = params.get('device_status', {}).get(switch_key)
+        # Process all channels in the message
+        # Note: Cloudflare already filtered - only valid channels with >10W are received
+        for key in params.keys():
+            if not key.startswith('switch:'):
+                continue
             
+            # Extract channel number
+            try:
+                channel = int(key.split(':')[1])
+            except (IndexError, ValueError):
+                continue
+            
+            switch_data = params[key]
             if not switch_data:
                 continue
             
@@ -86,79 +120,62 @@ async def process_shelly_message(message: Dict, device_id: str):
             current_time = get_current_minute()
             state_key = f"{device_id}_{channel}"
             
-            # Initialize state if needed
+            # Cancel existing stop timer (message received = pump still active)
+            if state_key in stop_timers:
+                timer = stop_timers[state_key]
+                if timer and not timer.done():
+                    timer.cancel()
+                stop_timers[state_key] = None
+            
+            # Initialize state if needed (first message for this channel)
             if state_key not in channel_states:
                 channel_states[state_key] = {
-                    'active': False,
                     'last_written': None,
                     'last_written_power': 0,
-                    'off_consecutive_minutes': 0
+                    'last_voltage': 0,
+                    'last_current': 0,
+                    'last_energy_total': 0
                 }
-            
-            state = channel_states[state_key]
-            was_active = state['active']
-            is_active = apower > POWER_THRESHOLD_W
-            
-            # Transition OFF → ON (start activity)
-            if not was_active and is_active:
+                # First message = start
                 await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "start")
-                state['active'] = True
-                state['last_written'] = current_time
-                state['last_written_power'] = apower
-                state['off_consecutive_minutes'] = 0  # Reset hysteresis counter
-            
-            # Transition ON → ON (during activity)
-            elif was_active and is_active:
-                state['off_consecutive_minutes'] = 0  # Reset hysteresis counter while active
-                # Only write if we're in a new minute
+                channel_states[state_key]['last_written'] = current_time
+                channel_states[state_key]['last_written_power'] = apower
+            else:
+                state = channel_states[state_key]
+                
+                # Check if we should write (only if in a new minute)
                 if state['last_written'] is None or state['last_written'] < current_time:
-                    written = False
                     power_delta = abs(apower - state['last_written_power'])
                     
-                    # Check if delta exceeds threshold
+                    # Write if delta ≥10W
                     if power_delta >= POWER_DELTA_MIN_W:
                         await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "delta")
+                        state['last_written'] = current_time
                         state['last_written_power'] = apower
-                        written = True
                     
-                    # Check if this is a sample minute (only if not already written)
+                    # OR write if sample minute (and not already written)
                     elif is_sample_minute(channel, current_time):
                         await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "sample")
-                        state['last_written_power'] = apower
-                        written = True
-                    
-                    # Always update last_written to mark this minute as processed
-                    state['last_written'] = current_time
-            
-            # Transition ON → OFF (end activity)
-            elif was_active and not is_active:
-                # Check if this channel has hysteresis configured
-                confirmation_required = OFF_CONFIRMATION_MINUTES.get(channel, 0)
-                
-                if confirmation_required > 0:
-                    # Channel has hysteresis (channel 2): require consecutive minutes below threshold
-                    # Only increment if we're in a new minute
-                    if state['last_written'] is None or state['last_written'] < current_time:
-                        state['off_consecutive_minutes'] += 1
                         state['last_written'] = current_time
-                    
-                    # Check if we've reached confirmation threshold
-                    if state['off_consecutive_minutes'] >= confirmation_required:
-                        await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
-                        state['active'] = False
-                        state['last_written'] = None
-                        state['last_written_power'] = 0
-                        state['off_consecutive_minutes'] = 0
-                    # else: wait for more confirmation, stay in ON state
-                else:
-                    # No hysteresis (channels 0, 1): immediate stop
-                    await write_db_row(device_id, channel, current_time, 0, voltage, current, energy_total, "stop")
-                    state['active'] = False
-                    state['last_written'] = None
-                    state['last_written_power'] = 0
-                    state['off_consecutive_minutes'] = 0
+                        state['last_written_power'] = apower
+                    else:
+                        # Update timestamp even if no write to prevent duplicate processing
+                        state['last_written'] = current_time
             
-            # Transition OFF → OFF: do nothing
+            # Store last telemetry for potential stop write
+            channel_states[state_key]['last_voltage'] = voltage
+            channel_states[state_key]['last_current'] = current
+            channel_states[state_key]['last_energy_total'] = energy_total
+            
+            # Start new stop timer
+            timeout_minutes = STOP_TIMEOUT_MINUTES.get(channel, 2)
+            timeout_seconds = timeout_minutes * 60
+            timer_task = asyncio.create_task(asyncio.sleep(timeout_seconds))
+            stop_timers[state_key] = timer_task
+            # Add callback when timer completes (capture variables immediately to avoid closure issue)
+            timer_task.add_done_callback(
+                lambda _, dev_id=device_id, ch=channel, sk=state_key: asyncio.create_task(trigger_stop(dev_id, ch, sk))
+            )
                 
     except Exception as e:
         print(f"Error processing message: {e}")
@@ -195,6 +212,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 
     except WebSocketDisconnect:
         print(f"WS disconnected: {device_id}")
+        # Cancel all timers for this device
+        for key in list(stop_timers.keys()):
+            if key.startswith(f"{device_id}_"):
+                timer = stop_timers[key]
+                if timer and not timer.done():
+                    timer.cancel()
+                del stop_timers[key]
     except Exception as e:
         print(f"WebSocket error: {e}")
 
@@ -208,12 +232,10 @@ async def startup_event():
         return
     
     db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=10)
-    print("Shelly WS collector started")
-    print(f"Monitoring channels: {CHANNELS}")
-    print(f"Power threshold: {POWER_THRESHOLD_W}W")
-    print(f"Power delta (during activity): {POWER_DELTA_MIN_W}W")
+    print("Shelly WS collector started (Cloudflare prefiltered)")
+    print(f"Delta threshold: {POWER_DELTA_MIN_W}W")
     print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min")
-    print(f"Hysteresis: ch2={OFF_CONFIRMATION_MINUTES.get(2, 0)}min confirmation for stop")
+    print(f"Stop timeout: ch0/1={STOP_TIMEOUT_MINUTES[0]}min, ch2={STOP_TIMEOUT_MINUTES[2]}min (no message)")
     print("Database: PostgreSQL connected")
 
 @app.on_event("shutdown")
