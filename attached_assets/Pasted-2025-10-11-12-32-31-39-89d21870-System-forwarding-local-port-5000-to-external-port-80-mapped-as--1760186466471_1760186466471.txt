@@ -1,0 +1,108 @@
+2025-10-11 12:32:31.39
+89d21870
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2025-10-11 12:32:34.71
+89d21870
+User
+INFO: Started server process [18]
+2025-10-11 12:32:34.71
+89d21870
+User
+INFO: Waiting for application startup.
+2025-10-11 12:32:35.32
+89d21870
+User
+INFO: Application startup complete.
+2025-10-11 12:32:35.32
+89d21870
+User
+INFO: Uvicorn running on http://0.0.0.0:5000 (Press CTRL+C to quit)
+2025-10-11 12:32:36.57
+89d21870
+User
+Shelly WS collector started (Cloudflare prefiltered)
+2025-10-11 12:32:36.57
+89d21870
+User
+Delta threshold: 10W
+2025-10-11 12:32:36.57
+89d21870
+User
+Sampling intervals: ch0/1=5min, ch2=20min
+2025-10-11 12:32:36.57
+89d21870
+User
+Stop timeout: ch0/1=1min, ch2=2min (no message)
+2025-10-11 12:32:36.57
+89d21870
+User
+Database: PostgreSQL connected
+2025-10-11 12:32:36.57
+89d21870
+User
+INFO: 127.0.0.1:33020 - "GET / HTTP/1.1" 200 OK
+2025-10-11 12:33:05.32
+89d21870
+User
+INFO: 34.30.242.206:0 - "WebSocket /ws" [accepted]
+2025-10-11 12:33:05.32
+89d21870
+User
+INFO: connection open
+2025-10-11 12:38:06.32
+89d21870
+User
+INFO: connection closed
+2025-10-11 12:38:33.52
+89d21870
+User
+INFO: 34.133.76.182:0 - "WebSocket /ws" [accepted]
+2025-10-11 12:38:33.52
+89d21870
+User
+INFO: connection open
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 438.2W @ 12:34 (start)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 12:35 (stop)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 432.6W @ 12:36 (delta)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 12:37 (stop)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 12:37 (stop)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 429.0W @ 12:38 (delta)
+2025-10-11 12:40:08.42
+89d21870
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 12:40:08.42
+89d21870
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 @ 12:38 - already has >10W write this minute
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 12:39 (stop)
+2025-10-11 12:40:08.42
+89d21870
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 436.5W @ 12:40 (delta)
+2025-10-11 12:40:08.42
+89d21870
+User
+INFO: 34.71.155.201:0 - "GET / HTTP/1.1" 200 OK
