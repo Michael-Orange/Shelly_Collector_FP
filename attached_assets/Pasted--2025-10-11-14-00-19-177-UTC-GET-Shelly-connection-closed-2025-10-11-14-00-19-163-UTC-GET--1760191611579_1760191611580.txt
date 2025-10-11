@@ -1,0 +1,1001 @@
+
+2025-10-11 14:00:19:177
+UTC
+GET /
+Shelly connection closed
+2025-10-11 14:00:19:163
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 14:00:00:222
+UTC
+GET /
+Message filtered out
+2025-10-11 14:00:00:222
+UTC
+GET /
+Message filtered out
+2025-10-11 14:00:00:222
+UTC
+GET /
+Message filtered out
+2025-10-11 14:00:00:171
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:59:00:247
+UTC
+GET /
+Message filtered out
+2025-10-11 13:59:00:247
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:59:00:247
+UTC
+GET /
+Message filtered out
+2025-10-11 13:59:00:180
+UTC
+GET /
+Message filtered out
+2025-10-11 13:58:00:191
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:58:00:191
+UTC
+GET /
+Message filtered out
+2025-10-11 13:58:00:191
+UTC
+GET /
+Message filtered out
+2025-10-11 13:58:00:191
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:58:633
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:19:820
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:11:851
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:04:888
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:00:183
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:00:183
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:00:183
+UTC
+GET /
+Message filtered out
+2025-10-11 13:57:00:173
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:56:55:928
+UTC
+GET /
+Message filtered out
+2025-10-11 13:56:47:946
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:56:29:038
+UTC
+GET /
+Message filtered out
+2025-10-11 13:56:00:202
+UTC
+GET /
+Message filtered out
+2025-10-11 13:56:00:191
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:56:00:191
+UTC
+GET /
+Message filtered out
+2025-10-11 13:56:00:181
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:47:243
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:26:364
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:18:412
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:18:233
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:18:217
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:18:165
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:55:17:608
+UTC
+GET /
+Message filtered out
+2025-10-11 13:55:17:603
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:55:17:542
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:55:17:542
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:54:48:015
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:54:48:005
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:54:47:498
+UTC
+GET /
+Message filtered out
+2025-10-11 13:54:00:230
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:54:00:230
+UTC
+GET /
+Message filtered out
+2025-10-11 13:54:00:230
+UTC
+GET /
+Message filtered out
+2025-10-11 13:54:00:179
+UTC
+GET /
+Message filtered out
+2025-10-11 13:53:40:775
+UTC
+GET /
+Message filtered out
+2025-10-11 13:53:00:234
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:53:00:234
+UTC
+GET /
+Message filtered out
+2025-10-11 13:53:00:234
+UTC
+GET /
+Message filtered out
+2025-10-11 13:53:00:183
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:41:024
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:41:014
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:01:170
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:52:00:161
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:00:161
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:52:00:161
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:55:712
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:45:043
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:14:450
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:05:444
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:134
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:20:096
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:133
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:082
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:061
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:008
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:49:46:554
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:46:544
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:46:467
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:49:46:467
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:49:20:423
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:49:20:412
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:49:00:176
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:176
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:168
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:142
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:26:324
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:25:132
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:02:445
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:141
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:53:490
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:145
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:148
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:515
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:474
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:420
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:44:18:930
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:18:921
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:18:844
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:53:00:183
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:41:024
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:41:014
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:01:170
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:52:00:161
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:00:161
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:52:00:161
+UTC
+GET /
+Message filtered out
+2025-10-11 13:52:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:55:712
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:45:043
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:14:450
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:05:444
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:185
+UTC
+GET /
+Message filtered out
+2025-10-11 13:51:00:134
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:20:096
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:50:00:133
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:082
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:061
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:47:008
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:49:46:554
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:46:544
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:46:467
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:49:46:467
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:49:20:423
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:49:20:412
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:49:00:176
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:176
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:168
+UTC
+GET /
+Message filtered out
+2025-10-11 13:49:00:142
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:26:324
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:25:132
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:02:445
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:151
+UTC
+GET /
+Message filtered out
+2025-10-11 13:48:00:141
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:53:490
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:196
+UTC
+GET /
+Message filtered out
+2025-10-11 13:47:00:145
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:195
+UTC
+GET /
+Message filtered out
+2025-10-11 13:46:00:148
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:152
+UTC
+GET /
+Message filtered out
+2025-10-11 13:45:00:143
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:515
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:474
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:19:420
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:44:18:930
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:18:921
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:18:844
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:44:18:844
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:43:52:650
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:43:52:631
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:43:00:211
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:43:00:211
+UTC
+GET /
+Message filtered out
+2025-10-11 13:43:00:211
+UTC
+GET /
+Message filtered out
+2025-10-11 13:43:00:160
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:18:258
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:03:328
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:154
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:41:48:398
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:214
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:214
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:41:00:214
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:163
+UTC
+GET /
+Message filtered out
+2025-10-11 13:40:00:207
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:40:00:207
+UTC
+GET /
+Message filtered out
+2025-10-11 13:40:00:207
+UTC
+GET /
+Message filtered out
+2025-10-11 13:40:00:160
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:29:088
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:20:133
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:08:194
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:00:165
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:00:165
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:00:165
+UTC
+GET /
+Message filtered out
+2025-10-11 13:39:00:155
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:38:51:706
+UTC
+GET /
+Message filtered out
+2025-10-11 13:38:51:681
+UTC
+GET /
+Message filtered out
+2025-10-11 13:38:51:632
+UTC
+GET /
+Connected to Replit backend
+2025-10-11 13:38:51:169
+UTC
+GET /
+Message filtered out
+2025-10-11 13:38:51:164
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:38:51:087
+UTC
+GET /
+New WebSocket connection from Shelly
+2025-10-11 13:38:51:087
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:38:25:846
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:38:25:835
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:38:00:169
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:38:00:169
+UTC
+GET /
+Message filtered out
+2025-10-11 13:38:00:169
+UTC
+GET /
+Message filtered out
+2025-10-11 13:38:00:159
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:46:781
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:46:781
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:46:781
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:46:734
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:00:171
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:00:164
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:00:164
+UTC
+GET /
+Message filtered out
+2025-10-11 13:37:00:158
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:36:41:935
+UTC
+GET /
+Message filtered out
+2025-10-11 13:36:15:055
+UTC
+GET /
+Message filtered out
+2025-10-11 13:36:00:219
+UTC
+GET /
+Message filtered out
+2025-10-11 13:36:00:219
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:36:00:219
+UTC
+GET /
+Message filtered out
+2025-10-11 13:36:00:172
+UTC
+GET /
+Message filtered out
+2025-10-11 13:35:05:383
+UTC
+GET /
+Message filtered out
+2025-10-11 13:35:00:222
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:35:00:222
+UTC
+GET /
+Message filtered out
+2025-10-11 13:35:00:222
+UTC
+GET /
+Message filtered out
+2025-10-11 13:44:18:844
+UTC
+GET /
+GET https://shelly-filter-proxy.michael-orange09.workers.dev/
+2025-10-11 13:43:52:650
+UTC
+GET /
+Shelly connection closed
+2025-10-11 13:43:52:631
+UTC
+GET /
+Backend WS closed: 1006 WebSocket disconnected without sending Close frame.
+2025-10-11 13:43:00:211
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:43:00:211
+UTC
+GET /
+Message filtered out
+2025-10-11 13:43:00:211
+UTC
+GET /
+Message filtered out
+2025-10-11 13:43:00:160
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:18:258
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:03:328
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:205
+UTC
+GET /
+Message filtered out
+2025-10-11 13:42:00:154
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:41:48:398
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:214
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:214
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:41:00:214
+UTC
+GET /
+Message filtered out
+2025-10-11 13:41:00:163
+UTC
+GET /
+Message filtered out
+2025-10-11 13:40:00:207
+UTC
+GET /
+Forwarding message to Replit
+2025-10-11 13:40:00:207
+UTC
+GET /
+Message filtered out

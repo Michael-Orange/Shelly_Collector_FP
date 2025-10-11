@@ -1,0 +1,168 @@
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 13:30 (stop)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:30:00 - last_written_power=0W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 - decision=SKIP (last_written_power=0W ≤10W, no real activity)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:31:00 (433.5W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 433.5W @ 13:31 (delta)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:32:00 (440.7W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:32:00 - last_written_power=433.5W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:32 - has_active_write(>10W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:32 - has_zero_write(0W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP decision: shellypro4pm-a0dd6c9ef474 ch:2 - decision=WRITE (last=433.5W, has_active=False, has_zero=False)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 13:32 (stop)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:32:00 - last_written_power=0W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 - decision=SKIP (last_written_power=0W ≤10W, no real activity)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:34:00 (437.8W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:34:00 - last_written_power=0W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 - decision=SKIP (last_written_power=0W ≤10W, no real activity)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 437.8W @ 13:34 (delta)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:35:00 (438.4W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:35:00 - last_written_power=437.8W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:35 - has_active_write(>10W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:35 - has_zero_write(0W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP decision: shellypro4pm-a0dd6c9ef474 ch:2 - decision=WRITE (last=437.8W, has_active=False, has_zero=False)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 13:35 (stop)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:36:00 (437.6W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 437.6W @ 13:36 (delta)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:37:00 (438.4W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:37:00 - last_written_power=437.6W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:37 - has_active_write(>10W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:37 - has_zero_write(0W)=False
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP decision: shellypro4pm-a0dd6c9ef474 ch:2 - decision=WRITE (last=437.6W, has_active=False, has_zero=False)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 13:37 (stop)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:37:00 - last_written_power=0W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 - decision=SKIP (last_written_power=0W ≤10W, no real activity)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:38:00 (441.7W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 441.7W @ 13:38 (delta)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:38:25 - last_written_power=441.7W
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:38 - has_active_write(>10W)=True
+2025-10-11 13:39:00.30
+1759b5d0
+User
+SKIP stop: shellypro4pm-a0dd6c9ef474 ch:2 - decision=SKIP (already has >10W write this minute)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:39:00 (442.0W)
+2025-10-11 13:39:00.30
+1759b5d0
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 13:39:00 - last_written_power=441.7W
