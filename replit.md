@@ -6,7 +6,12 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Fixed critical race condition causing duplicate 0W writes:
+**2025-10-11 (Latest)**: Uniformized hysteresis timeout to 2 minutes for all channels:
+- **All channels (0, 1, 2)**: Now use 2-minute timeout (previously ch0/1 used 1 min)
+- Provides consistent stop detection across all equipment types
+- Reduces false positives for short-duration equipment on channels 0 & 1
+
+**2025-10-11**: Fixed critical race condition causing duplicate 0W writes:
 - **🔧 Protection 5 - asyncio.Lock**: Global lock serializes all stop write operations (prevents concurrent timer execution)
 - **🔧 Protection 3b - Enhanced anti-duplication**: Additional check for existing 0W entries in same minute (blocks any doublons)
 - **Problem solved**: Multiple timers expiring simultaneously were passing all checks in parallel before any wrote, creating duplicate 0W entries
@@ -22,8 +27,6 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 **2025-10-11**: Complete refactoring to timer-based stop detection with Cloudflare prefiltering:
 - **Cloudflare prefiltering**: Messages already filtered (>10W, valid channels only) - removed all server-side threshold/channel verification
 - **Timer-based hysteresis**: Stop detection now based on message absence (not power threshold)
-  - Channel 0 & 1: 1 minute without message → stop
-  - Channel 2: 2 minutes without message → stop
 - **Simplified logic**: All received messages = pump active (no state machine transitions)
 - **Updated sampling**: Channels 0/1 from 3min to 5min, channel 2 stays 20min
 - **Result**: Drastically simplified codebase, eliminated false stop bugs, maintains accurate pump tracking
@@ -81,8 +84,7 @@ Preferred communication style: Simple, everyday language.
 - Each message resets a per-channel timer
 - If no message received for X minutes → write stop (0W)
 - **Stop timeout** (`STOP_TIMEOUT_MINUTES`):
-  - **Channels 0 & 1**: 1 minute without message → confirmed stop
-  - **Channel 2 (pump)**: 2 minutes without message → confirmed stop
+  - **All channels (0, 1, 2)**: 2 minutes without message → confirmed stop
 - Eliminates false stops from momentary glitches (erratic 0W readings don't reach server)
 
 **Write Logic**:
@@ -109,7 +111,7 @@ Preferred communication style: Simple, everyday language.
 
 **Timer Management**:
 - Each message cancels existing timer and creates new one
-- Timer duration: 1min (ch0/1) or 2min (ch2)
+- Timer duration: 2 minutes for all channels (0, 1, 2)
 - Timer callback writes stop (0W) with last known telemetry
 - Timers cancelled on WebSocket disconnect
 

@@ -19,8 +19,8 @@ SAMPLE_INTERVALS = {
 
 # Hysteresis: minutes without message before confirming stop
 STOP_TIMEOUT_MINUTES = {
-    0: 1,  # Channel 0: 1 minute without message → stop
-    1: 1,  # Channel 1: 1 minute without message → stop
+    0: 2,  # Channel 0: 2 minutes without message → stop
+    1: 2,  # Channel 1: 2 minutes without message → stop
     2: 2   # Channel 2: 2 minutes without message → stop
 }
 
