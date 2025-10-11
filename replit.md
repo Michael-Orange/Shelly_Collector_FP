@@ -6,7 +6,14 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Complete refactoring to timer-based stop detection with Cloudflare prefiltering:
+**2025-10-11 (Latest)**: Added 4-layer protection system to eliminate ALL parasitic 0W writes:
+- **🔧 Layer 1 - Security filter**: Server ignores any message with apower ≤10W (double-check after Cloudflare)
+- **🔧 Layer 2 - Conditional hysteresis**: Timer only writes 0W if last_written_power >10W (prevents stops on micro-activity)
+- **🔧 Layer 3 - Anti-duplication**: No 0W write if >10W entry already exists in same minute
+- **🔧 Layer 4 - Systematic timer reset**: Every message (even without DB write) cancels/recreates timer
+- **Result**: Only genuine stops (after real activity >10W) write 0W - zero parasitic entries
+
+**2025-10-11**: Complete refactoring to timer-based stop detection with Cloudflare prefiltering:
 - **Cloudflare prefiltering**: Messages already filtered (>10W, valid channels only) - removed all server-side threshold/channel verification
 - **Timer-based hysteresis**: Stop detection now based on message absence (not power threshold)
   - Channel 0 & 1: 1 minute without message → stop
