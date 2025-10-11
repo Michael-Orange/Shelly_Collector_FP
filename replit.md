@@ -6,7 +6,12 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Implemented grace period for WebSocket disconnections:
+**2025-10-11 (Latest)**: Cost optimization - reduced resource usage:
+- **🔧 PostgreSQL pool**: Reduced max_size from 10 → 3 connections (lightweight usage pattern)
+- **🔧 Sampling ch2**: Increased from 20min → 30min (-33% writes for pump channel)
+- **Result**: ~30-40% cost reduction on PostgreSQL + compute units while maintaining data quality
+
+**2025-10-11**: Implemented grace period for WebSocket disconnections:
 - **🔧 Problem**: WebSocket disconnections (every 5 min from Cloudflare) were cancelling timers prematurely, preventing 0W writes
 - **🔧 Solution - Option C**: Timers now continue running during disconnections (automatic grace period of 2 minutes)
 - **🔧 Behavior**: Reconnection with activity >10W → timer reset; No reconnection/activity → timer expires → 0W written

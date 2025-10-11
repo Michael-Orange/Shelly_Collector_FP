@@ -14,7 +14,7 @@ POWER_DELTA_MIN_W = 10  # Minimum variation to log during activity
 SAMPLE_INTERVALS = {
     0: 5,   # Channel 0: sample every 5 minutes
     1: 5,   # Channel 1: sample every 5 minutes
-    2: 20   # Channel 2: sample every 20 minutes
+    2: 30   # Channel 2: sample every 30 minutes
 }
 
 # Hysteresis: minutes without message before confirming stop
@@ -305,7 +305,7 @@ async def startup_event():
         print("ERROR: DATABASE_URL not found!", flush=True)
         return
     
-    db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=10)
+    db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=3)
     print("Shelly WS collector started (Cloudflare prefiltered)", flush=True)
     print(f"Delta threshold: {POWER_DELTA_MIN_W}W", flush=True)
     print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min", flush=True)

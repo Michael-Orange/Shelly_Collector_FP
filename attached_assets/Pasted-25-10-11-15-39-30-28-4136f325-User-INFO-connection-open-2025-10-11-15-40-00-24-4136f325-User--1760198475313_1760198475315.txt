@@ -1,0 +1,188 @@
+25-10-11 15:39:30.28
+4136f325
+User
+INFO: connection open
+2025-10-11 15:40:00.24
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 431.9W @ 15:40:00
+2025-10-11 15:40:00.24
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:40:00 (431.9W)
+2025-10-11 15:40:01.00
+4136f325
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 431.9W @ 15:40 (sample)
+2025-10-11 15:41:00.30
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 438.0W @ 15:41:00
+2025-10-11 15:41:00.30
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:41:00 (438.0W)
+2025-10-11 15:44:00.28
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 436.5W @ 15:44:00
+2025-10-11 15:44:00.28
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:44:00 (436.5W)
+2025-10-11 15:44:31.28
+4136f325
+User
+INFO: connection closed
+2025-10-11 15:44:31.28
+4136f325
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474 - timers continue (grace period)
+2025-10-11 15:45:02.00
+4136f325
+User
+INFO: 104.197.78.4:0 - "WebSocket /ws" [accepted]
+2025-10-11 15:45:02.00
+4136f325
+User
+INFO: connection open
+2025-10-11 15:46:00.23
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 437.2W @ 15:46:00
+2025-10-11 15:46:00.23
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:46:00 (437.2W)
+2025-10-11 15:47:00.24
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 429.8W @ 15:47:00
+2025-10-11 15:47:00.24
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:47:00 (429.8W)
+2025-10-11 15:48:00.24
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 433.7W @ 15:48:00
+2025-10-11 15:48:00.24
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:48:00 (433.7W)
+2025-10-11 15:49:00.24
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 432.1W @ 15:49:00
+2025-10-11 15:49:00.24
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:49:00 (432.1W)
+2025-10-11 15:50:00.24
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 437.1W @ 15:50:00
+2025-10-11 15:50:00.24
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:50:00 (437.1W)
+2025-10-11 15:50:03.00
+4136f325
+User
+INFO: connection closed
+2025-10-11 15:50:03.00
+4136f325
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474 - timers continue (grace period)
+2025-10-11 15:50:31.15
+4136f325
+User
+INFO: 34.30.242.206:0 - "WebSocket /ws" [accepted]
+2025-10-11 15:50:31.15
+4136f325
+User
+INFO: connection open
+2025-10-11 15:51:00.23
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 434.2W @ 15:51:00
+2025-10-11 15:51:00.23
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:51:00 (434.2W)
+2025-10-11 15:52:00.28
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 440.0W @ 15:52:00
+2025-10-11 15:52:00.28
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:52:00 (440.0W)
+2025-10-11 15:53:00.27
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 429.8W @ 15:53:00
+2025-10-11 15:53:00.27
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:53:00 (429.8W)
+2025-10-11 15:54:00.22
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 438.6W @ 15:54:00
+2025-10-11 15:54:00.22
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:54:00 (438.6W)
+2025-10-11 15:55:00.26
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 435.3W @ 15:55:00
+2025-10-11 15:55:00.26
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:55:00 (435.3W)
+2025-10-11 15:55:32.15
+4136f325
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474 - timers continue (grace period)
+2025-10-11 15:55:32.15
+4136f325
+User
+INFO: connection closed
+2025-10-11 15:55:59.24
+4136f325
+User
+INFO: 35.238.185.44:0 - "WebSocket /ws" [accepted]
+2025-10-11 15:55:59.24
+4136f325
+User
+INFO: connection open
+2025-10-11 15:56:00.22
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 428.3W @ 15:56:00
+2025-10-11 15:56:00.22
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:56:00 (428.3W)
+2025-10-11 15:57:00.23
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 432.3W @ 15:57:00
+2025-10-11 15:57:00.23
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:57:00 (432.3W)
+2025-10-11 15:58:00.26
+4136f325
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 435.2W @ 15:58:00
+2025-10-11 15:58:00.26
+4136f325
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 15:58:00 (435.2W)
+2025-10-11 16:00:00.26
+4136f325
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 16:00:00 - last_written_power=431.9W
