@@ -29,6 +29,7 @@ app = FastAPI()
 channel_states: Dict[str, Dict] = {}
 stop_timers: Dict[str, Optional[asyncio.Task]] = {}
 db_pool: Optional[asyncpg.Pool] = None
+stop_write_lock = asyncio.Lock()  # Prevent race conditions on stop writes
 
 def get_current_minute():
     return datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -84,44 +85,64 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower
 
 async def trigger_stop(device_id: str, channel: int, state_key: str):
     """Callback when stop timer expires - no message received for X minutes"""
-    current_time = get_current_minute()
-    state = channel_states.get(state_key)
-    
-    if not state:
-        return
-    
-    # 🔧 Protection 2: Hystérésis conditionnelle
-    # Ne déclencher l'arrêt que si la dernière écriture était > 10W
-    last_written_power = state.get('last_written_power', 0)
-    if last_written_power <= 10:
-        print(f"SKIP stop: {device_id} ch:{channel} - last_written_power={last_written_power}W ≤10W (no real activity)")
+    # 🔧 Protection 5: Lock to prevent race conditions on simultaneous stop writes
+    async with stop_write_lock:
+        current_time = get_current_minute()
+        state = channel_states.get(state_key)
+        
+        if not state:
+            return
+        
+        # 🔧 Protection 2: Hystérésis conditionnelle
+        # Ne déclencher l'arrêt que si la dernière écriture était > 10W
+        last_written_power = state.get('last_written_power', 0)
+        if last_written_power <= 10:
+            print(f"SKIP stop: {device_id} ch:{channel} - last_written_power={last_written_power}W ≤10W (no real activity)")
+            stop_timers[state_key] = None
+            return
+        
+        # 🔧 Protection 3: Anti-duplication par minute
+        # Ne pas écrire 0W s'il existe déjà une écriture >10W cette minute
+        has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
+        if has_active_write:
+            print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has >10W write this minute")
+            stop_timers[state_key] = None
+            return
+        
+        # 🔧 Protection 3b: Also check if there's already ANY write at 0W this minute (blocks doublons)
+        if db_pool:
+            try:
+                async with db_pool.acquire() as conn:
+                    zero_w_count = await conn.fetchval('''
+                        SELECT COUNT(*) FROM power_logs
+                        WHERE device_id = $1 
+                        AND channel = $2 
+                        AND timestamp = $3
+                        AND apower_w = 0
+                    ''', device_id, f"switch:{channel}", current_time)
+                    if zero_w_count > 0:
+                        print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has 0W write this minute")
+                        stop_timers[state_key] = None
+                        return
+            except Exception as e:
+                print(f"Error checking existing 0W: {e}")
+        
+        # Write stop with last known telemetry values
+        await write_db_row(
+            device_id, 
+            channel, 
+            current_time, 
+            0,  # Power = 0W for stop
+            state.get('last_voltage', 0),
+            state.get('last_current', 0),
+            state.get('last_energy_total', 0),
+            "stop"
+        )
+        
+        # Reset state
+        state['last_written'] = None
+        state['last_written_power'] = 0
         stop_timers[state_key] = None
-        return
-    
-    # 🔧 Protection 3: Anti-duplication par minute
-    # Ne pas écrire 0W s'il existe déjà une écriture >10W cette minute
-    has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
-    if has_active_write:
-        print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has >10W write this minute")
-        stop_timers[state_key] = None
-        return
-    
-    # Write stop with last known telemetry values
-    await write_db_row(
-        device_id, 
-        channel, 
-        current_time, 
-        0,  # Power = 0W for stop
-        state.get('last_voltage', 0),
-        state.get('last_current', 0),
-        state.get('last_energy_total', 0),
-        "stop"
-    )
-    
-    # Reset state
-    state['last_written'] = None
-    state['last_written_power'] = 0
-    stop_timers[state_key] = None
 
 async def process_shelly_message(message: Dict, device_id: str):
     try:
