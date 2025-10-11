@@ -40,6 +40,24 @@ def is_sample_minute(channel: int, timestamp: datetime) -> bool:
         return False
     return timestamp.minute % interval == 0
 
+async def check_existing_write_in_minute(device_id: str, channel: int, timestamp: datetime) -> bool:
+    """Check if there's already a write >10W for this device/channel in this minute"""
+    if not db_pool:
+        return False
+    try:
+        async with db_pool.acquire() as conn:
+            result = await conn.fetchval('''
+                SELECT COUNT(*) FROM power_logs
+                WHERE device_id = $1 
+                AND channel = $2 
+                AND timestamp = $3
+                AND apower_w > 10
+            ''', device_id, f"switch:{channel}", timestamp)
+            return result > 0
+    except Exception as e:
+        print(f"Error checking existing write: {e}")
+        return False
+
 async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, 
                        voltage: float, current: float, energy_total: float, reason: str = ""):
     if not db_pool:
@@ -70,6 +88,22 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
     state = channel_states.get(state_key)
     
     if not state:
+        return
+    
+    # 🔧 Protection 2: Hystérésis conditionnelle
+    # Ne déclencher l'arrêt que si la dernière écriture était > 10W
+    last_written_power = state.get('last_written_power', 0)
+    if last_written_power <= 10:
+        print(f"SKIP stop: {device_id} ch:{channel} - last_written_power={last_written_power}W ≤10W (no real activity)")
+        stop_timers[state_key] = None
+        return
+    
+    # 🔧 Protection 3: Anti-duplication par minute
+    # Ne pas écrire 0W s'il existe déjà une écriture >10W cette minute
+    has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
+    if has_active_write:
+        print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has >10W write this minute")
+        stop_timers[state_key] = None
         return
     
     # Write stop with last known telemetry values
@@ -117,9 +151,16 @@ async def process_shelly_message(message: Dict, device_id: str):
             current = switch_data.get('current', 0)
             energy_total = switch_data.get('aenergy', {}).get('total', 0)
             
+            # 🔧 Protection 1: Filtre de sécurité à la réception
+            # Ignorer tout message avec apower ≤ 10W (double sécurité au cas où Cloudflare laisserait passer)
+            if apower <= 10:
+                print(f"FILTER: {device_id} ch:{channel} {apower}W ≤10W - ignored")
+                continue
+            
             current_time = get_current_minute()
             state_key = f"{device_id}_{channel}"
             
+            # 🔧 Protection 4: Reset timer systématique à CHAQUE message
             # Cancel existing stop timer (message received = pump still active)
             if state_key in stop_timers:
                 timer = stop_timers[state_key]
