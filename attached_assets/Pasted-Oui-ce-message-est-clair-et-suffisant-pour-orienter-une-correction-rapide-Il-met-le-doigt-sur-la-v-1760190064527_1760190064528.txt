@@ -1,0 +1,85 @@
+Oui, ce message est clair et suffisant pour orienter une correction rapide. Il met le doigt sur la vraie cause: le timer n’est pas recréé quand un message ≤10W arrive, à cause du continue avant la création du nouveau timer.
+
+Je te propose de le condenser en “actionnable” pour Replit, en 3 changements précis, plus un exemple de squelette try/finally.
+
+Message final à envoyer à Replit
+
+Objet: Corriger reset des timers – toujours recréer le timer, même si apower ≤10W
+
+1) Bug identifié
+- Le code fait continue quand apower ≤ 10W, avant la création du nouveau timer.
+- Résultat: l’ancien timer est annulé, mais aucun nouveau timer n’est recréé → il expirera plus tard et écrira 0W en pleine activité.
+
+2) Correctif à appliquer
+- Déplacer la création du timer dans un finally, pour qu’il soit TOUJOURS recréé (que apower soit ≤10W ou >10W, que l’on écrive ou non).
+- Réinitialiser le timer à CHAQUE message reçu (forwardé par Cloudflare), même si aucune écriture DB n’a lieu (delta <10, pas sample).
+
+3) Protection de concurrence
+- Conserver le lock asyncio sur toute la section trigger_stop (vérifs + écriture + update last_written_power).
+- Faire le check “déjà >10W écrit dans la minute” et l’insert 0W dans la même section protégée (et idéalement transactionnelle).
+- Utiliser minute_bucket = date_trunc('minute', ts_utc) pour l’anti-dup minute.
+
+4) Logs de preuve
+- Ajouter:
+  - RESET timer: device, ch, HH:MM:SS (W=…)
+  - STOP attempt: last=…, has_active_min=…, decision=WRITE/SKIP
+  - SKIP stop: last<=10W / already >10W this minute
+  - DB: … (stop)
+
+Squelette recommandé (pseudo-code)
+
+# à l’entrée du handler d’un message
+key = (device_id, ch)
+
+# Toujours réarmer le timer – même si on va filtrer ensuite
+# (try/finally pour garantir la recréation)
+try:
+    # Annuler l’ancien timer s’il existe
+    old = stop_timers.get(key)
+    if old and not old.done():
+        old.cancel()
+
+    # Traitement métier (peut ne rien écrire)
+    if apower <= 10:
+        print(f"FILTER … {apower}W ≤10W - ignored")
+        return
+
+    # … (start/delta/sample) …
+    # if wrote >10W: last_written_power[key] = apower
+
+finally:
+    # Toujours recréer le timer ici
+    delay = 120  # 2 min pour tous
+    stop_timers[key] = asyncio.create_task(trigger_stop_after_delay(device_id, ch, delay))
+
+async def trigger_stop_after_delay(device_id, ch, delay):
+    await asyncio.sleep(delay)
+    await trigger_stop(device_id, ch, datetime.utcnow())
+
+async def trigger_stop(device_id, ch, now_ts):
+    async with stop_lock:
+        # last_written_power check
+        last = last_written_power.get((device_id, ch))
+        print(f"STOP attempt … last={last}")
+        if last is None or last <= 10:
+            print("SKIP stop: last<=10W")
+            return
+
+        bucket = date_trunc_minute(now_ts)
+        if await exists_gt10_in_minute(device_id, ch, bucket):
+            print("SKIP stop: already >10W write this minute")
+            return
+        if await exists_zero_in_minute(device_id, ch, bucket):
+            print("SKIP stop: already 0W this minute")
+            return
+
+        await write_db_stop_zero(device_id, ch, bucket)
+        last_written_power[(device_id, ch)] = 0.0
+        print("DB: … 0W (stop)")
+
+Pourquoi ça suffira
+- Le timer est désormais recréé systématiquement (plus de “trou” quand un ≤10W arrive).
+- Les 0W intercalés disparaissent (timer toujours réarmé pendant l’activité).
+- Le lock + anti-dup minute évitent doublons et races.
+
+Envoie ce prompt (condensé) à Replit. Une fois appliqué, fais un cycle ON 5–10 min puis OFF 2–3 min; on doit voir: start/delta/sample pendant ON, puis un seul 0W stop après silence, et aucun 0W intercalé.

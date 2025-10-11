@@ -83,9 +83,14 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower
     except Exception as e:
         print(f"Error writing to DB: {e}")
 
+async def trigger_stop_after_delay(device_id: str, channel: int, state_key: str, delay_seconds: int):
+    """Wait for delay, then trigger stop check"""
+    await asyncio.sleep(delay_seconds)
+    await trigger_stop(device_id, channel, state_key)
+
 async def trigger_stop(device_id: str, channel: int, state_key: str):
     """Callback when stop timer expires - no message received for X minutes"""
-    # 🔧 Protection 5: Lock to prevent race conditions on simultaneous stop writes
+    # 🔧 Protection: Lock to prevent race conditions on simultaneous stop writes
     async with stop_write_lock:
         current_time = get_current_minute()
         current_time_precise = datetime.now(timezone.utc)
@@ -98,15 +103,13 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
         last_written_power = state.get('last_written_power', 0)
         print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - last_written_power={last_written_power}W")
         
-        # 🔧 Protection 2: Hystérésis conditionnelle
-        # Ne déclencher l'arrêt que si la dernière écriture était > 10W
+        # Protection: Conditional hysteresis - only trigger stop if last write was > 10W
         if last_written_power <= 10:
-            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (last_written_power={last_written_power}W ≤10W, no real activity)")
+            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (last={last_written_power}W ≤10W, no real activity)")
             stop_timers[state_key] = None
             return
         
-        # 🔧 Protection 3: Anti-duplication par minute
-        # Ne pas écrire 0W s'il existe déjà une écriture >10W cette minute
+        # Protection: Anti-duplication - don't write 0W if there's already a >10W write this minute
         has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
         print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_active_write(>10W)={has_active_write}")
         
@@ -115,7 +118,7 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
             stop_timers[state_key] = None
             return
         
-        # 🔧 Protection 3b: Also check if there's already ANY write at 0W this minute (blocks doublons)
+        # Protection: Also check if there's already a 0W write this minute (blocks duplicates)
         has_zero_write = False
         if db_pool:
             try:
@@ -163,7 +166,6 @@ async def process_shelly_message(message: Dict, device_id: str):
         params = message.get('params', {})
         
         # Process all channels in the message
-        # Note: Cloudflare already filtered - only valid channels with >10W are received
         for key in params.keys():
             if not key.startswith('switch:'):
                 continue
@@ -183,74 +185,75 @@ async def process_shelly_message(message: Dict, device_id: str):
             current = switch_data.get('current', 0)
             energy_total = switch_data.get('aenergy', {}).get('total', 0)
             
-            # 🔧 Protection 1: Filtre de sécurité à la réception
-            # Ignorer tout message avec apower ≤ 10W (double sécurité au cas où Cloudflare laisserait passer)
-            if apower <= 10:
-                print(f"FILTER: {device_id} ch:{channel} {apower}W ≤10W - ignored")
-                continue
-            
             current_time = get_current_minute()
             current_time_precise = datetime.now(timezone.utc)
             state_key = f"{device_id}_{channel}"
             
-            # 🔧 Protection 4: Reset timer systématique à CHAQUE message
-            # Cancel existing stop timer (message received = pump still active)
+            # Log RAW message (before any filtering)
+            print(f"RAW message: {device_id} ch:{channel} {apower}W @ {current_time_precise.strftime('%H:%M:%S')}")
+            
+            # Cancel existing stop timer BEFORE try block
             if state_key in stop_timers:
                 timer = stop_timers[state_key]
                 if timer and not timer.done():
                     timer.cancel()
                 stop_timers[state_key] = None
-            print(f"RESET timer: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} ({apower}W)")
             
-            # Initialize state if needed (first message for this channel)
-            if state_key not in channel_states:
-                channel_states[state_key] = {
-                    'last_written': None,
-                    'last_written_power': 0,
-                    'last_voltage': 0,
-                    'last_current': 0,
-                    'last_energy_total': 0
-                }
-                # First message = start
-                await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "start")
-                channel_states[state_key]['last_written'] = current_time
-                channel_states[state_key]['last_written_power'] = apower
-            else:
-                state = channel_states[state_key]
+            try:
+                # Security filter: ignore ≤10W (Cloudflare should already filter, this is backup)
+                if apower <= 10:
+                    print(f"FILTER: {device_id} ch:{channel} {apower}W ≤10W - ignored")
+                    continue  # Safe to skip - timer will still be recreated in finally
                 
-                # Check if we should write (only if in a new minute)
-                if state['last_written'] is None or state['last_written'] < current_time:
-                    power_delta = abs(apower - state['last_written_power'])
+                print(f"RESET timer: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} ({apower}W)")
+                
+                # Initialize state if needed (first message for this channel)
+                if state_key not in channel_states:
+                    channel_states[state_key] = {
+                        'last_written': None,
+                        'last_written_power': 0,
+                        'last_voltage': 0,
+                        'last_current': 0,
+                        'last_energy_total': 0
+                    }
+                    # First message = start
+                    await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "start")
+                    channel_states[state_key]['last_written'] = current_time
+                    channel_states[state_key]['last_written_power'] = apower
+                else:
+                    state = channel_states[state_key]
                     
-                    # Write if delta ≥10W
-                    if power_delta >= POWER_DELTA_MIN_W:
-                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "delta")
-                        state['last_written'] = current_time
-                        state['last_written_power'] = apower
-                    
-                    # OR write if sample minute (and not already written)
-                    elif is_sample_minute(channel, current_time):
-                        await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "sample")
-                        state['last_written'] = current_time
-                        state['last_written_power'] = apower
-                    else:
-                        # Update timestamp even if no write to prevent duplicate processing
-                        state['last_written'] = current_time
-            
-            # Store last telemetry for potential stop write
-            channel_states[state_key]['last_voltage'] = voltage
-            channel_states[state_key]['last_current'] = current
-            channel_states[state_key]['last_energy_total'] = energy_total
-            
-            # Start new stop timer
-            timeout_minutes = STOP_TIMEOUT_MINUTES.get(channel, 2)
-            timeout_seconds = timeout_minutes * 60
-            timer_task = asyncio.create_task(asyncio.sleep(timeout_seconds))
-            stop_timers[state_key] = timer_task
-            # Add callback when timer completes (capture variables immediately to avoid closure issue)
-            timer_task.add_done_callback(
-                lambda _, dev_id=device_id, ch=channel, sk=state_key: asyncio.create_task(trigger_stop(dev_id, ch, sk))
-            )
+                    # Check if we should write (only if in a new minute)
+                    if state['last_written'] is None or state['last_written'] < current_time:
+                        power_delta = abs(apower - state['last_written_power'])
+                        
+                        # Write if delta ≥10W
+                        if power_delta >= POWER_DELTA_MIN_W:
+                            await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "delta")
+                            state['last_written'] = current_time
+                            state['last_written_power'] = apower
+                        
+                        # OR write if sample minute (and not already written)
+                        elif is_sample_minute(channel, current_time):
+                            await write_db_row(device_id, channel, current_time, apower, voltage, current, energy_total, "sample")
+                            state['last_written'] = current_time
+                            state['last_written_power'] = apower
+                        else:
+                            # Update timestamp even if no write to prevent duplicate processing
+                            state['last_written'] = current_time
+                
+                # Store last telemetry for potential stop write
+                channel_states[state_key]['last_voltage'] = voltage
+                channel_states[state_key]['last_current'] = current
+                channel_states[state_key]['last_energy_total'] = energy_total
+                
+            finally:
+                # ✅ ALWAYS recreate timer - even if message was filtered or no DB write occurred
+                # This is CRITICAL: prevents orphaned timers that would trigger false stops
+                timeout_minutes = STOP_TIMEOUT_MINUTES.get(channel, 2)
+                timeout_seconds = timeout_minutes * 60
+                timer_task = asyncio.create_task(trigger_stop_after_delay(device_id, channel, state_key, timeout_seconds))
+                stop_timers[state_key] = timer_task
                 
     except Exception as e:
         print(f"Error processing message: {e}")
