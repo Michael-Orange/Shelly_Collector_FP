@@ -62,7 +62,7 @@ async def check_existing_write_in_minute(device_id: str, channel: int, timestamp
 async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower: float, 
                        voltage: float, current: float, energy_total: float, reason: str = ""):
     if not db_pool:
-        print("ERROR: Database pool not initialized")
+        print("ERROR: Database pool not initialized", flush=True)
         return
     try:
         async with db_pool.acquire() as conn:
@@ -79,9 +79,9 @@ async def write_db_row(device_id: str, channel: int, timestamp: datetime, apower
                 energy_total
             )
         reason_str = f" ({reason})" if reason else ""
-        print(f"DB: {device_id} ch:{channel} {apower}W @ {timestamp.strftime('%H:%M')}{reason_str}")
+        print(f"DB: {device_id} ch:{channel} {apower}W @ {timestamp.strftime('%H:%M')}{reason_str}", flush=True)
     except Exception as e:
-        print(f"Error writing to DB: {e}")
+        print(f"Error writing to DB: {e}", flush=True)
 
 async def trigger_stop_after_delay(device_id: str, channel: int, state_key: str, delay_seconds: int):
     """Wait for delay, then trigger stop check"""
@@ -97,24 +97,24 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
         state = channel_states.get(state_key)
         
         if not state:
-            print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - NO STATE, aborting")
+            print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - NO STATE, aborting", flush=True)
             return
         
         last_written_power = state.get('last_written_power', 0)
-        print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - last_written_power={last_written_power}W")
+        print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - last_written_power={last_written_power}W", flush=True)
         
         # Protection: Conditional hysteresis - only trigger stop if last write was > 10W
         if last_written_power <= 10:
-            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (last={last_written_power}W ≤10W, no real activity)")
+            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (last={last_written_power}W ≤10W, no real activity)", flush=True)
             stop_timers[state_key] = None
             return
         
         # Protection: Anti-duplication - don't write 0W if there's already a >10W write this minute
         has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
-        print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_active_write(>10W)={has_active_write}")
+        print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_active_write(>10W)={has_active_write}", flush=True)
         
         if has_active_write:
-            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has >10W write this minute)")
+            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has >10W write this minute)", flush=True)
             stop_timers[state_key] = None
             return
         
@@ -131,17 +131,17 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
                         AND apower_w = 0
                     ''', device_id, f"switch:{channel}", current_time)
                     has_zero_write = (zero_w_count > 0)
-                    print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_zero_write(0W)={has_zero_write}")
+                    print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_zero_write(0W)={has_zero_write}", flush=True)
                     
                     if has_zero_write:
-                        print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has 0W write this minute)")
+                        print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has 0W write this minute)", flush=True)
                         stop_timers[state_key] = None
                         return
             except Exception as e:
-                print(f"Error checking existing 0W: {e}")
+                print(f"Error checking existing 0W: {e}", flush=True)
         
         # Write stop with last known telemetry values
-        print(f"STOP decision: {device_id} ch:{channel} - decision=WRITE (last={last_written_power}W, has_active={has_active_write}, has_zero={has_zero_write})")
+        print(f"STOP decision: {device_id} ch:{channel} - decision=WRITE (last={last_written_power}W, has_active={has_active_write}, has_zero={has_zero_write})", flush=True)
         await write_db_row(
             device_id, 
             channel, 
@@ -190,7 +190,7 @@ async def process_shelly_message(message: Dict, device_id: str):
             state_key = f"{device_id}_{channel}"
             
             # Log RAW message (before any filtering)
-            print(f"RAW message: {device_id} ch:{channel} {apower}W @ {current_time_precise.strftime('%H:%M:%S')}")
+            print(f"RAW message: {device_id} ch:{channel} {apower}W @ {current_time_precise.strftime('%H:%M:%S')}", flush=True)
             
             # Cancel existing stop timer BEFORE try block
             if state_key in stop_timers:
@@ -202,10 +202,10 @@ async def process_shelly_message(message: Dict, device_id: str):
             try:
                 # Security filter: ignore ≤10W (Cloudflare should already filter, this is backup)
                 if apower <= 10:
-                    print(f"FILTER: {device_id} ch:{channel} {apower}W ≤10W - ignored")
+                    print(f"FILTER: {device_id} ch:{channel} {apower}W ≤10W - ignored", flush=True)
                     continue  # Safe to skip - timer will still be recreated in finally
                 
-                print(f"RESET timer: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} ({apower}W)")
+                print(f"RESET timer: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} ({apower}W)", flush=True)
                 
                 # Initialize state if needed (first message for this channel)
                 if state_key not in channel_states:
@@ -271,7 +271,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.send_text('{"id":1,"src":"collector","method":"NotifyStatus","params":{"enable":true}}')
         await websocket.send_text('{"id":2,"src":"collector","method":"Shelly.GetStatus"}')
     except Exception as e:
-        print(f"Failed to send initial RPC: {e}")
+        print(f"Failed to send initial RPC: {e}", flush=True)
     
     try:
         while True:
@@ -286,10 +286,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 await process_shelly_message(message, device_id)
                 
             except json.JSONDecodeError as e:
-                print(f"Invalid JSON received: {e}")
+                print(f"Invalid JSON received: {e}", flush=True)
                 
     except WebSocketDisconnect:
-        print(f"WS disconnected: {device_id}")
+        print(f"WS disconnected: {device_id}", flush=True)
         # Cancel all timers for this device
         for key in list(stop_timers.keys()):
             if key.startswith(f"{device_id}_"):
@@ -298,7 +298,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     timer.cancel()
                 del stop_timers[key]
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"WebSocket error: {e}", flush=True)
 
 @app.on_event("startup")
 async def startup_event():
@@ -306,19 +306,19 @@ async def startup_event():
     
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
-        print("ERROR: DATABASE_URL not found!")
+        print("ERROR: DATABASE_URL not found!", flush=True)
         return
     
     db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=10)
-    print("Shelly WS collector started (Cloudflare prefiltered)")
-    print(f"Delta threshold: {POWER_DELTA_MIN_W}W")
-    print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min")
-    print(f"Stop timeout: ch0/1={STOP_TIMEOUT_MINUTES[0]}min, ch2={STOP_TIMEOUT_MINUTES[2]}min (no message)")
-    print("Database: PostgreSQL connected")
+    print("Shelly WS collector started (Cloudflare prefiltered)", flush=True)
+    print(f"Delta threshold: {POWER_DELTA_MIN_W}W", flush=True)
+    print(f"Sampling intervals: ch0/1={SAMPLE_INTERVALS[0]}min, ch2={SAMPLE_INTERVALS[2]}min", flush=True)
+    print(f"Stop timeout: ch0/1={STOP_TIMEOUT_MINUTES[0]}min, ch2={STOP_TIMEOUT_MINUTES[2]}min (no message)", flush=True)
+    print("Database: PostgreSQL connected", flush=True)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global db_pool
     if db_pool:
         await db_pool.close()
-        print("Database pool closed")
+        print("Database pool closed", flush=True)
