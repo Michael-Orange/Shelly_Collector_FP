@@ -1,0 +1,196 @@
+2025-10-11 14:39:57.86
+c10fd0aa
+System
+main done, exiting
+2025-10-11 14:40:13.29
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:1 1264.1W @ 14:40:13
+2025-10-11 14:40:13.29
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:1 @ 14:40:13 (1264.1W)
+2025-10-11 14:40:15.94
+12ea5d4f
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:1 1264.1W @ 14:40 (start)
+2025-10-11 14:41:00.24
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:1 1225.5W @ 14:41:00
+2025-10-11 14:41:00.24
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:1 @ 14:41:00 (1225.5W)
+2025-10-11 14:41:00.29
+12ea5d4f
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:1 1225.5W @ 14:41 (delta)
+2025-10-11 14:42:00.25
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:1 1222.7W @ 14:42:00
+2025-10-11 14:42:00.25
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:1 @ 14:42:00 (1222.7W)
+2025-10-11 14:43:00.27
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:1 1236.8W @ 14:43:00
+2025-10-11 14:43:00.27
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:1 @ 14:43:00 (1236.8W)
+2025-10-11 14:43:02.53
+12ea5d4f
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:1 1236.8W @ 14:43 (delta)
+2025-10-11 14:44:10.05
+12ea5d4f
+User
+INFO: connection closed
+2025-10-11 14:44:10.05
+12ea5d4f
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 14:44:36.89
+12ea5d4f
+User
+INFO: connection open
+2025-10-11 14:47:51.94
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 436.9W @ 14:47:51
+2025-10-11 14:47:51.94
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:47:51 (436.9W)
+2025-10-11 14:47:54.20
+12ea5d4f
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 436.9W @ 14:47 (start)
+2025-10-11 14:48:00.24
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 434.8W @ 14:48:00
+2025-10-11 14:48:00.24
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:48:00 (434.8W)
+2025-10-11 14:49:00.22
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 429.8W @ 14:49:00
+2025-10-11 14:49:00.22
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:49:00 (429.8W)
+2025-10-11 14:49:37.88
+12ea5d4f
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 14:49:37.88
+12ea5d4f
+User
+INFO: connection closed
+2025-10-11 14:50:06.11
+12ea5d4f
+User
+INFO: 34.59.40.34:0 - "WebSocket /ws" [accepted]
+2025-10-11 14:50:06.11
+12ea5d4f
+User
+INFO: connection open
+2025-10-11 14:51:00.22
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 433.4W @ 14:51:00
+2025-10-11 14:51:00.22
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:51:00 (433.4W)
+2025-10-11 14:52:00.22
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 435.6W @ 14:52:00
+2025-10-11 14:52:00.22
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:52:00 (435.6W)
+2025-10-11 14:53:00.24
+12ea5d4f
+User
+RAW message: shellypro4pm-a0dd6c9ef474 ch:2 434.8W @ 14:53:00
+2025-10-11 14:53:00.24
+12ea5d4f
+User
+RESET timer: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:53:00 (434.8W)
+2025-10-11 14:55:00.24
+12ea5d4f
+User
+STOP attempt: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:55:00 - last_written_power=436.9W
+2025-10-11 14:55:00.90
+12ea5d4f
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:55 - has_active_write(>10W)=False
+2025-10-11 14:55:00.94
+12ea5d4f
+User
+STOP check: shellypro4pm-a0dd6c9ef474 ch:2 @ 14:55 - has_zero_write(0W)=False
+2025-10-11 14:55:00.96
+12ea5d4f
+User
+STOP decision: shellypro4pm-a0dd6c9ef474 ch:2 - decision=WRITE (last=436.9W, has_active=False, has_zero=False)
+2025-10-11 14:55:01.04
+12ea5d4f
+User
+DB: shellypro4pm-a0dd6c9ef474 ch:2 0W @ 14:55 (stop)
+2025-10-11 14:55:07.10
+12ea5d4f
+User
+WS disconnected: shellypro4pm-a0dd6c9ef474
+2025-10-11 14:55:07.10
+12ea5d4f
+User
+INFO: connection closed
+2025-10-11 14:55:34.83
+12ea5d4f
+User
+INFO: 34.41.89.175:0 - "WebSocket /ws" [accepted]
+2025-10-11 14:55:34.83
+12ea5d4f
+User
+INFO: connection open
+2025-10-11 15:00:35.83
+12ea5d4f
+User
+WS disconnected: unknown
+2025-10-11 15:00:35.83
+12ea5d4f
+User
+INFO: connection closed
+2025-10-11 15:01:03.57
+12ea5d4f
+User
+INFO: 34.59.40.34:0 - "WebSocket /ws" [accepted]
+2025-10-11 15:01:03.57
+12ea5d4f
+User
+INFO: connection open
+2025-10-11 15:06:04.57
+12ea5d4f
+User
+WS disconnected: unknown
+2025-10-11 15:06:04.57
+12ea5d4f
+User
+INFO: connection closed
+2025-10-11 15:06:32.39
+12ea5d4f
+User
+INFO: 34.29.136.0:0 - "WebSocket /ws" [accepted]
+2025-10-11 15:06:32.39
+12ea5d4f
+User
+INFO: connection open

@@ -289,14 +289,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"Invalid JSON received: {e}", flush=True)
                 
     except WebSocketDisconnect:
-        print(f"WS disconnected: {device_id}", flush=True)
-        # Cancel all timers for this device
-        for key in list(stop_timers.keys()):
-            if key.startswith(f"{device_id}_"):
-                timer = stop_timers[key]
-                if timer and not timer.done():
-                    timer.cancel()
-                del stop_timers[key]
+        print(f"WS disconnected: {device_id} - timers continue (grace period)", flush=True)
+        # Option C: Don't cancel timers - let them run as grace period
+        # If device reconnects with activity, timers will be reset automatically
+        # If no reconnection or activity, timers will expire and write 0W
     except Exception as e:
         print(f"WebSocket error: {e}", flush=True)
 

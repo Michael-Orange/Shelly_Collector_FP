@@ -6,7 +6,14 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Fixed critical timer recreation bug causing parasitic 0W writes:
+**2025-10-11 (Latest)**: Implemented grace period for WebSocket disconnections:
+- **🔧 Problem**: WebSocket disconnections (every 5 min from Cloudflare) were cancelling timers prematurely, preventing 0W writes
+- **🔧 Solution - Option C**: Timers now continue running during disconnections (automatic grace period of 2 minutes)
+- **🔧 Behavior**: Reconnection with activity >10W → timer reset; No reconnection/activity → timer expires → 0W written
+- **🔧 Enhanced logging**: Added `flush=True` to all print statements for immediate log visibility
+- **Result**: Eliminates missing 0W entries caused by temporary WebSocket disconnections while preserving accurate stop detection
+
+**2025-10-11**: Fixed critical timer recreation bug causing parasitic 0W writes:
 - **🔧 Root cause identified**: When ≤10W message arrived, old timer was cancelled but new timer was NOT created (due to `continue` before timer creation)
 - **🔧 Solution - try/finally pattern**: Timer now ALWAYS recreated in finally block, even if message is filtered
 - **🔧 Separated delay function**: Created `trigger_stop_after_delay()` to cleanly separate sleep from stop logic
