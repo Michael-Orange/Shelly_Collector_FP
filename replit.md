@@ -6,28 +6,26 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-09 (Latest)**: Added channel-specific hysteresis to prevent false stop detections:
+**2025-10-11 (Latest)**: Complete refactoring to timer-based stop detection with Cloudflare prefiltering:
+- **Cloudflare prefiltering**: Messages already filtered (>10W, valid channels only) - removed all server-side threshold/channel verification
+- **Timer-based hysteresis**: Stop detection now based on message absence (not power threshold)
+  - Channel 0 & 1: 1 minute without message → stop
+  - Channel 2: 2 minutes without message → stop
+- **Simplified logic**: All received messages = pump active (no state machine transitions)
+- **Updated sampling**: Channels 0/1 from 3min to 5min, channel 2 stays 20min
+- **Result**: Drastically simplified codebase, eliminated false stop bugs, maintains accurate pump tracking
+
+**2025-10-09**: Added channel-specific hysteresis to prevent false stop detections:
 - Implemented 2-minute confirmation period for channel 2 (pump) before logging OFF state
 - Protects against erratic 0W sensor readings that were causing false stop/start cycles
 - Channels 0 & 1 remain unchanged with immediate stop detection (suitable for short-duration equipment ≤4min)
-- Tracks consecutive minutes below threshold per channel
 - Result: Eliminates spurious stop entries in database while preserving accurate pump cycle tracking
 
-**2025-10-09**: Added periodic sampling for baseline tracking:
-- Implemented periodic sampling during activity (ON state) for reference points
-- Sampling intervals: channels 0/1 every 3 minutes, channel 2 every 20 minutes
-- Samples only written if no other write occurred in that minute (anti-duplication)
-- Enhanced logging with write reasons (start/delta/sample/stop) for debugging
-- Result: Maintains low write volume while ensuring regular baseline data points
-
-**2025-10-09**: Major optimization to reduce database write volume:
+**2025-10-09**: Added periodic sampling + delta-based filtering optimization:
 - Implemented intelligent delta-based filtering with `POWER_DELTA_MIN_W = 10W`
-- New transition logic: OFF→ON (forced write), ON→ON (write only if Δ≥10W), ON→OFF (forced write @ 0W)
-- Increased activity threshold to `POWER_THRESHOLD_W = 10W` (from 5W)
-- Removed `fill_missing_minutes()` - no longer needed with delta filtering
-- Tracks `last_written_power` to calculate deltas during activity periods
-- Adjusted monitored channels to [0, 1, 2] (removed channel 3)
-- Result: Drastically reduced DB writes while preserving all critical events (starts, stops, significant variations)
+- Periodic sampling: channels 0/1 every 3 minutes, channel 2 every 20 minutes
+- Enhanced logging with write reasons (start/delta/sample/stop) for debugging
+- Result: Drastically reduced DB writes while preserving all critical events
 
 **2025-10-08**: Migrated from CSV to PostgreSQL for data persistence:
 - Created `power_logs` table with proper indexing (timestamp, device_id+channel)
@@ -57,40 +55,56 @@ Preferred communication style: Simple, everyday language.
 - HTTP health check endpoint at `/` returning plain text status
 
 ## Data Collection Strategy
-**Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes. Additionally, Shelly sensors occasionally send erratic 0W readings during normal operation, causing false stop detections.
+**Problem**: Shelly devices send frequent status updates, but we only want to log critical events and significant changes. Shelly sensors occasionally send erratic 0W readings during normal operation.
 
-**Solution**: Delta-based intelligent logging with dual thresholds + periodic sampling + channel-specific hysteresis
-- **Activity threshold** (`POWER_THRESHOLD_W = 10W`): Determines OFF/ON state transitions
-- **Delta threshold** (`POWER_DELTA_MIN_W = 10W`): Filters writes during activity (ON→ON)
-- **Hysteresis protection** (`OFF_CONFIRMATION_MINUTES`): Channel-specific delay before confirming OFF state
-  - **Channel 2 (pump)**: Requires 2 consecutive minutes below threshold to confirm stop
-  - **Channels 0 & 1**: No delay, immediate stop detection (suitable for short cycles ≤4min)
-  - **Purpose**: Eliminates false stops from momentary 0W sensor glitches on long-running equipment
-- **Transition rules**:
-  - **OFF→ON**: Force write (activity start)
-  - **ON→ON**: Write if |Δpower| ≥ 10W OR periodic sample minute
-  - **ON→OFF**: 
-    - Channels 0/1: Immediate force write @ 0W (activity end)
-    - Channel 2: Force write @ 0W only after 2 consecutive minutes below threshold
-  - **OFF→OFF**: No write
-- **Periodic sampling** (during ON state only):
-  - Channels 0 & 1: every 3 minutes (at :00, :03, :06, :09, etc.)
+**Solution**: Timer-based stop detection with Cloudflare prefiltering + delta-based intelligent logging
+
+**Cloudflare Prefiltering** (upstream):
+- Filters messages to >10W only on valid channels
+- Server receives ONLY relevant messages - no threshold checks needed server-side
+- All received messages = pump is active
+
+**Timer-Based Stop Detection**:
+- Each message resets a per-channel timer
+- If no message received for X minutes → write stop (0W)
+- **Stop timeout** (`STOP_TIMEOUT_MINUTES`):
+  - **Channels 0 & 1**: 1 minute without message → confirmed stop
+  - **Channel 2 (pump)**: 2 minutes without message → confirmed stop
+- Eliminates false stops from momentary glitches (erratic 0W readings don't reach server)
+
+**Write Logic**:
+- **First message per channel**: Force write (start)
+- **Subsequent messages**: Write if:
+  - Variation ≥10W (`POWER_DELTA_MIN_W`) vs last write → (delta)
+  - OR periodic sample minute → (sample)
+- **Stop detection**: Timer expires (no message for X min) → write 0W (stop)
+
+**Periodic sampling**:
+  - Channels 0 & 1: every 5 minutes (at :00, :05, :10, :15, etc.)
   - Channel 2: every 20 minutes (at :00, :20, :40)
-  - Samples only written if no other write in that minute (anti-duplication)
+  - Samples only written if no delta write in that minute (anti-duplication)
 - Maximum one entry per minute per channel
 
-**Rationale**: This approach drastically reduces write volume (and Replit costs) while preserving all critical information: pump starts, stops, significant power variations, AND regular baseline samples for trend analysis. The hysteresis protection prevents spurious stop/start cycles from sensor noise. Example: Pump running at 430W receives erratic 0W reading at 10:33, but continues at 435W at 10:34 → hysteresis prevents false stop entry, only real stops (2+ consecutive minutes at 0W) are logged.
+**Rationale**: Timer-based approach drastically simplifies logic and eliminates all false stop bugs. Cloudflare prefiltering removes server-side complexity. Delta + sampling preserves critical events and trend data while minimizing writes. Example: Pump running at 430W, Cloudflare blocks erratic 0W reading, server timer keeps running, only real stops (2+ min silence) trigger stop write.
 
 ## State Management
 **In-memory channel state tracking** using Python dictionaries:
-- Stores last written timestamp per device/channel combination
+- `channel_states`: Stores last written timestamp, power value, and telemetry per device/channel
+- `stop_timers`: Asyncio tasks that trigger stop write when no message received for X minutes
 - Tracks last written power value for delta calculations
-- Maintains activity state (OFF/ON based on threshold)
+- Stores last telemetry (voltage, current, energy) for stop write
+
+**Timer Management**:
+- Each message cancels existing timer and creates new one
+- Timer duration: 1min (ch0/1) or 2min (ch2)
+- Timer callback writes stop (0W) with last known telemetry
+- Timers cancelled on WebSocket disconnect
 
 **Trade-offs**: 
 - ✅ Simple implementation, no external dependencies
 - ✅ Fast lookups and delta calculations
-- ⚠️ State lost on restart (acceptable - next transition will reinitialize)
+- ✅ Eliminates false stop bugs (timer-based vs threshold-based)
+- ⚠️ State lost on restart (acceptable - next message will reinitialize)
 - ⚠️ Memory grows with device/channel count (minimal for typical deployments)
 
 ## Data Storage
@@ -112,22 +126,21 @@ Preferred communication style: Simple, everyday language.
 2. **RPC bootstrap commands** sent immediately to activate data flow:
    - `NotifyStatus` with `enable: true` to start streaming
    - `Shelly.GetStatus` to retrieve immediate status dump
-3. **JSON-RPC message parsing** from `params.switch:{X}` or `params.device_status.switch:{X}` (dual lookup)
-4. **State transition detection** (OFF→ON, ON→ON, ON→OFF, OFF→OFF)
-5. **Delta-based write filtering with periodic sampling**:
-   - Transitions (OFF↔ON): Always write
-   - During activity (ON→ON): Write if |Δpower| ≥ 10W OR periodic sample minute
+3. **Cloudflare prefiltering** (upstream): Only >10W messages on valid channels reach server
+4. **JSON-RPC message parsing** from `params.switch:{X}` format
+5. **Timer management**: Cancel existing timer, process message, create new timer
+6. **Write logic**:
+   - First message for channel → write (start)
+   - Subsequent messages → write if delta ≥10W OR sample minute
    - Anti-duplication: max 1 write per minute per channel
-6. **PostgreSQL insert** with async connection pooling and error handling
+7. **Stop detection**: Timer expires (X min without message) → callback writes 0W (stop)
+8. **PostgreSQL insert** with async connection pooling and error handling
 
 ## Configuration
 **Top-level constants** for easy customization:
-- `CHANNELS = [0, 1, 2]` - Which switch channels to monitor
-- `POWER_THRESHOLD_W = 10` - Activity threshold in watts (OFF/ON state boundary)
-- `POWER_DELTA_MIN_W = 10` - Minimum power variation to log during activity (ON→ON filtering)
-- `SAMPLE_INTERVALS = {0: 3, 1: 3, 2: 20}` - Periodic sampling intervals in minutes per channel
-- `OFF_CONFIRMATION_MINUTES = {2: 2}` - Channel-specific hysteresis: minutes of consecutive low power before confirming OFF (channel 2 only)
-- `WRITE_TZ = "UTC"` - Timezone for timestamps
+- `POWER_DELTA_MIN_W = 10` - Minimum power variation to log during activity (delta filtering)
+- `SAMPLE_INTERVALS = {0: 5, 1: 5, 2: 20}` - Periodic sampling intervals in minutes per channel
+- `STOP_TIMEOUT_MINUTES = {0: 1, 1: 1, 2: 2}` - Minutes without message before confirming stop (timer-based hysteresis)
 
 **Environment variables** (auto-configured by Replit):
 - `DATABASE_URL` - PostgreSQL connection string
