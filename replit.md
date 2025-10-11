@@ -6,7 +6,14 @@ The primary goal is to monitor specific power channels (particularly switch:2 fo
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Uniformized hysteresis timeout to 2 minutes for all channels:
+**2025-10-11 (Latest)**: Fixed critical timer recreation bug causing parasitic 0W writes:
+- **🔧 Root cause identified**: When ≤10W message arrived, old timer was cancelled but new timer was NOT created (due to `continue` before timer creation)
+- **🔧 Solution - try/finally pattern**: Timer now ALWAYS recreated in finally block, even if message is filtered
+- **🔧 Separated delay function**: Created `trigger_stop_after_delay()` to cleanly separate sleep from stop logic
+- **🔧 Enhanced logging**: Added RAW message logs (before filtering) + detailed STOP attempt logs with decision traces
+- **Result**: Eliminates orphaned timers that would expire during active operation and write spurious 0W entries
+
+**2025-10-11**: Uniformized hysteresis timeout to 2 minutes for all channels:
 - **All channels (0, 1, 2)**: Now use 2-minute timeout (previously ch0/1 used 1 min)
 - Provides consistent stop detection across all equipment types
 - Reduces false positives for short-duration equipment on channels 0 & 1
