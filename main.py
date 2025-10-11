@@ -88,28 +88,35 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
     # 🔧 Protection 5: Lock to prevent race conditions on simultaneous stop writes
     async with stop_write_lock:
         current_time = get_current_minute()
+        current_time_precise = datetime.now(timezone.utc)
         state = channel_states.get(state_key)
         
         if not state:
+            print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - NO STATE, aborting")
             return
+        
+        last_written_power = state.get('last_written_power', 0)
+        print(f"STOP attempt: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} - last_written_power={last_written_power}W")
         
         # 🔧 Protection 2: Hystérésis conditionnelle
         # Ne déclencher l'arrêt que si la dernière écriture était > 10W
-        last_written_power = state.get('last_written_power', 0)
         if last_written_power <= 10:
-            print(f"SKIP stop: {device_id} ch:{channel} - last_written_power={last_written_power}W ≤10W (no real activity)")
+            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (last_written_power={last_written_power}W ≤10W, no real activity)")
             stop_timers[state_key] = None
             return
         
         # 🔧 Protection 3: Anti-duplication par minute
         # Ne pas écrire 0W s'il existe déjà une écriture >10W cette minute
         has_active_write = await check_existing_write_in_minute(device_id, channel, current_time)
+        print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_active_write(>10W)={has_active_write}")
+        
         if has_active_write:
-            print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has >10W write this minute")
+            print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has >10W write this minute)")
             stop_timers[state_key] = None
             return
         
         # 🔧 Protection 3b: Also check if there's already ANY write at 0W this minute (blocks doublons)
+        has_zero_write = False
         if db_pool:
             try:
                 async with db_pool.acquire() as conn:
@@ -120,14 +127,18 @@ async def trigger_stop(device_id: str, channel: int, state_key: str):
                         AND timestamp = $3
                         AND apower_w = 0
                     ''', device_id, f"switch:{channel}", current_time)
-                    if zero_w_count > 0:
-                        print(f"SKIP stop: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - already has 0W write this minute")
+                    has_zero_write = (zero_w_count > 0)
+                    print(f"STOP check: {device_id} ch:{channel} @ {current_time.strftime('%H:%M')} - has_zero_write(0W)={has_zero_write}")
+                    
+                    if has_zero_write:
+                        print(f"SKIP stop: {device_id} ch:{channel} - decision=SKIP (already has 0W write this minute)")
                         stop_timers[state_key] = None
                         return
             except Exception as e:
                 print(f"Error checking existing 0W: {e}")
         
         # Write stop with last known telemetry values
+        print(f"STOP decision: {device_id} ch:{channel} - decision=WRITE (last={last_written_power}W, has_active={has_active_write}, has_zero={has_zero_write})")
         await write_db_row(
             device_id, 
             channel, 
@@ -179,6 +190,7 @@ async def process_shelly_message(message: Dict, device_id: str):
                 continue
             
             current_time = get_current_minute()
+            current_time_precise = datetime.now(timezone.utc)
             state_key = f"{device_id}_{channel}"
             
             # 🔧 Protection 4: Reset timer systématique à CHAQUE message
@@ -188,6 +200,7 @@ async def process_shelly_message(message: Dict, device_id: str):
                 if timer and not timer.done():
                     timer.cancel()
                 stop_timers[state_key] = None
+            print(f"RESET timer: {device_id} ch:{channel} @ {current_time_precise.strftime('%H:%M:%S')} ({apower}W)")
             
             # Initialize state if needed (first message for this channel)
             if state_key not in channel_states:
