@@ -1,14 +1,41 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import PlainTextResponse
 import asyncpg
 import json
 import os
+import time
 from datetime import datetime, timezone, timedelta
 
 app = FastAPI()
 
 last_write_time = {}
 db_pool = None
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware pour logger toutes les requêtes HTTP avec détails complets"""
+    start_time = time.time()
+    now = datetime.now(timezone.utc)
+    
+    # Log AVANT traitement (cold start detection)
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    referer = request.headers.get("referer", "none")
+    
+    print(f"🔍 [{now.strftime('%H:%M:%S.%f')[:-3]}] HTTP {request.method} {request.url.path}", flush=True)
+    print(f"   📍 IP: {client_ip}", flush=True)
+    print(f"   🌐 User-Agent: {user_agent}", flush=True)
+    print(f"   🔗 Referer: {referer}", flush=True)
+    print(f"   📋 Headers: {dict(request.headers)}", flush=True)
+    
+    # Traiter la requête
+    response = await call_next(request)
+    
+    # Log APRÈS traitement
+    duration = (time.time() - start_time) * 1000  # en ms
+    print(f"   ✅ Status: {response.status_code} | Duration: {duration:.2f}ms", flush=True)
+    
+    return response
 
 async def write_to_db(device_id: str, channel: int, apower: float, voltage: float, current: float, energy_total: float):
     """Write telemetry data to PostgreSQL"""
@@ -35,6 +62,13 @@ async def root():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     device_id = "unknown"
+    
+    # Log détaillé connexion WebSocket
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    now = datetime.now(timezone.utc)
+    print(f"🔌 [{now.strftime('%H:%M:%S.%f')[:-3]}] WebSocket CONNECTED", flush=True)
+    print(f"   📍 IP: {client_ip}", flush=True)
+    print(f"   📋 Headers: {dict(websocket.headers)}", flush=True)
     
     try:
         await websocket.send_text('{"id":1,"src":"collector","method":"NotifyStatus","params":{"enable":true}}')
@@ -88,7 +122,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"JSON error: {e}", flush=True)
                 
     except WebSocketDisconnect:
-        print(f"WS disconnected: {device_id}", flush=True)
+        now = datetime.now(timezone.utc)
+        print(f"🔌 [{now.strftime('%H:%M:%S.%f')[:-3]}] WebSocket DISCONNECTED: {device_id}", flush=True)
     except Exception as e:
         print(f"WS error: {e}", flush=True)
 
@@ -96,18 +131,31 @@ async def websocket_endpoint(websocket: WebSocket):
 async def startup():
     global db_pool
     
+    now = datetime.now(timezone.utc)
+    print("=" * 80, flush=True)
+    print(f"🚀 [{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} UTC] APPLICATION STARTUP (COLD START)", flush=True)
+    print("=" * 80, flush=True)
+    
     database_url = os.environ.get('DATABASE_URL')
     if not database_url:
         print("ERROR: DATABASE_URL not found!", flush=True)
         return
     
     db_pool = await asyncpg.create_pool(database_url, min_size=1, max_size=3)
-    print("Shelly WS collector started (simple 1min throttling)", flush=True)
-    print("Database: PostgreSQL connected", flush=True)
+    print("✅ Shelly WS collector started (simple 1min throttling)", flush=True)
+    print("✅ Database: PostgreSQL connected", flush=True)
+    print("✅ Request logging: ENABLED (detailed)", flush=True)
+    print("=" * 80, flush=True)
 
 @app.on_event("shutdown")
 async def shutdown():
     global db_pool
+    
+    now = datetime.now(timezone.utc)
+    print("=" * 80, flush=True)
+    print(f"💤 [{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} UTC] APPLICATION SHUTDOWN", flush=True)
+    print("=" * 80, flush=True)
+    
     if db_pool:
         await db_pool.close()
-        print("Database closed", flush=True)
+        print("✅ Database closed", flush=True)
