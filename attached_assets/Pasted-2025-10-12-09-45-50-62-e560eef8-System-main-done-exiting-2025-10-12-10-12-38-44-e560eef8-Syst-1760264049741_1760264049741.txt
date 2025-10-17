@@ -1,0 +1,132 @@
+2025-10-12 09:45:50.62
+e560eef8
+System
+main done, exiting
+2025-10-12 10:12:38.44
+e560eef8
+System
+starting up user application
+2025-10-12 10:12:38.44
+e560eef8
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2025-10-12 10:12:42.76
+e560eef8
+User
+INFO: Started server process [21]
+2025-10-12 10:12:42.76
+e560eef8
+User
+INFO: Waiting for application startup.
+2025-10-12 10:12:42.76
+e560eef8
+User
+================================================================================
+2025-10-12 10:12:42.76
+e560eef8
+User
+🚀 [2025-10-12 10:12:42.764 UTC] APPLICATION STARTUP (COLD START)
+2025-10-12 10:12:42.76
+e560eef8
+User
+================================================================================
+2025-10-12 10:12:43.30
+e560eef8
+User
+✅ Shelly WS collector started (simple 1min throttling)
+2025-10-12 10:12:43.30
+e560eef8
+User
+✅ Database: PostgreSQL connected
+2025-10-12 10:12:43.30
+e560eef8
+User
+✅ Request logging: ENABLED (detailed)
+2025-10-12 10:12:43.30
+e560eef8
+User
+================================================================================
+2025-10-12 10:12:43.30
+e560eef8
+User
+INFO: Application startup complete.
+2025-10-12 10:12:43.30
+e560eef8
+User
+INFO: Uvicorn running on http://0.0.0.0:5000 (Press CTRL+C to quit)
+2025-10-12 10:12:44.24
+e560eef8
+User
+🔍 [10:12:44.244] HTTP GET /
+2025-10-12 10:12:44.24
+e560eef8
+User
+📍 IP: 127.0.0.1
+2025-10-12 10:12:44.24
+e560eef8
+User
+🌐 User-Agent: Go-http-client/1.1
+2025-10-12 10:12:44.24
+e560eef8
+User
+🔗 Referer: none
+2025-10-12 10:12:44.24
+e560eef8
+User
+📋 Headers: {'host': '127.0.0.1:1104', 'user-agent': 'Go-http-client/1.1', 'accept-encoding': 'gzip', 'server-timing': 'pid1req;dur=1760263964220', 'x-replit-healthcheck': '1', 'x-replit-user-bio': '', 'x-replit-user-id': '', 'x-replit-user-name': '', 'x-replit-user-profile-image': '', 'x-replit-user-roles': '', 'x-replit-user-teams': '', 'x-replit-user-url': ''}
+2025-10-12 10:12:44.24
+e560eef8
+User
+✅ Status: 200 | Duration: 0.65ms
+2025-10-12 10:12:44.24
+e560eef8
+User
+INFO: 127.0.0.1:36640 - "GET / HTTP/1.1" 200 OK
+2025-10-12 10:12:54.47
+e560eef8
+User
+INFO: 34.134.129.97:0 - "WebSocket /ws" [accepted]
+2025-10-12 10:12:54.47
+e560eef8
+User
+🔌 [10:12:54.470] WebSocket CONNECTED
+2025-10-12 10:12:54.47
+e560eef8
+User
+📍 IP: 34.134.129.97
+2025-10-12 10:12:54.47
+e560eef8
+User
+📋 Headers: {'host': 'shelly-ws-collector-sagemcom.replit.app', 'accept-encoding': 'gzip, br', 'cdn-loop': 'cloudflare; loops=1; subreqs=1', 'cf-connecting-ip': '2a06:98c0:3600::103', 'cf-ew-via': '15', 'cf-ray': '98d5d24d14cb2941-DKR', 'cf-visitor': '{"scheme":"https"}', 'cf-worker': 'michael-orange09.workers.dev', 'connection': 'Upgrade', 'sec-websocket-extensions': 'permessage-deflate', 'sec-websocket-key': 'u0NtoZaDF8tjW4FiV+Yu1g==', 'sec-websocket-version': '13', 'server-timing': 'depproxy;dur=1760263974410', 'traceparent': '00-48e6961202511631ca6fc5b0c323e7ee-2bfc5d0dbe845c77-01', 'upgrade': 'websocket', 'via': '1.1 google', 'x-cloud-trace-context': '48e6961202511631ca6fc5b0c323e7ee/3169510551374290039;o=1', 'x-forwarded-for': '2a06:98c0:3600::103, 172.69.15.180, 34.117.33.233, 35.191.75.229,34.134.129.97', 'x-forwarded-host': 'shelly-ws-collector-sagemcom.replit.app', 'x-forwarded-proto': 'https', 'x-replit-user-bio': '', 'x-replit-user-id': '', 'x-replit-user-name': '', 'x-replit-user-profile-image': '', 'x-replit-user-roles': '', 'x-replit-user-teams': '', 'x-replit-user-url': ''}
+2025-10-12 10:12:54.47
+e560eef8
+User
+INFO: connection open
+2025-10-12 10:13:05.00
+e560eef8
+User
+🔌 [10:13:05.006] WebSocket DISCONNECTED: unknown
+2025-10-12 10:13:05.00
+e560eef8
+User
+INFO: connection closed
+2025-10-12 10:13:14.19
+e560eef8
+User
+INFO: 34.41.89.175:0 - "WebSocket /ws" [accepted]
+2025-10-12 10:13:14.19
+e560eef8
+User
+🔌 [10:13:14.194] WebSocket CONNECTED
+2025-10-12 10:13:14.19
+e560eef8
+User
+📍 IP: 34.41.89.175
+2025-10-12 10:13:14.19
+e560eef8
+User
+📋 Headers: {'host': 'shelly-ws-collector-sagemcom.replit.app', 'accept-encoding': 'gzip, br', 'cdn-loop': 'cloudflare; loops=1; subreqs=1', 'cf-connecting-ip': '2a06:98c0:3600::103', 'cf-ew-via': '15', 'cf-ray': '98d5d2ca01d52941-DKR', 'cf-visitor': '{"scheme":"https"}', 'cf-worker': 'michael-orange09.workers.dev', 'connection': 'Upgrade', 'sec-websocket-extensions': 'permessage-deflate', 'sec-websocket-key': 'ORB7xJeS5MpFLnbuCSOVkQ==', 'sec-websocket-version': '13', 'server-timing': 'depproxy;dur=1760263994158', 'traceparent': '00-da3d366603d57ac5a0f50c0c666e1ced-60a5a7068d11c942-01', 'upgrade': 'websocket', 'via': '1.1 google', 'x-cloud-trace-context': 'da3d366603d57ac5a0f50c0c666e1ced/6964156045376735554;o=1', 'x-forwarded-for': '2a06:98c0:3600::103, 172.69.15.180, 34.117.33.233, 35.191.76.104,34.41.89.175', 'x-forwarded-host': 'shelly-ws-collector-sagemcom.replit.app', 'x-forwarded-proto': 'https', 'x-replit-user-bio': '', 'x-replit-user-id': '', 'x-replit-user-name': '', 'x-replit-user-profile-image': '', 'x-replit-user-roles': '', 'x-replit-user-teams': '', 'x-replit-user-url': ''}
+2025-10-12 10:13:14.19
+e560eef8
+User
+INFO: connection open

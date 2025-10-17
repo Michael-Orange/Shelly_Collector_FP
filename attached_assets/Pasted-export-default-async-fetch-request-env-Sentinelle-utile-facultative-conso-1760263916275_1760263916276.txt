@@ -1,0 +1,159 @@
+export default {
+  async fetch(request, env) {
+    // Sentinelle utile (facultative)
+    // console.log("FETCH HIT", new Date().toISOString(), "upgrade=", request.headers.get("Upgrade"));
+    if (request.headers.get("Upgrade") === "websocket") {
+      return handleWebSocket(request, env);
+    }
+    return new Response("Shelly Filter Proxy - WebSocket only", { status: 200 });
+  },
+};
+
+function shouldForwardMessage(data) {
+  // Filtrage STRICT : switch:0/1/2 et apower > 10W uniquement
+  const channelsInclude = [0, 1, 2];
+  const powerThreshold = 10;
+
+  if (data && data.params) {
+    for (const ch of channelsInclude) {
+      const sw = data.params[`switch:${ch}`];
+      if (sw && typeof sw.apower === "number" && sw.apower > powerThreshold) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function handleWebSocket(request, env) {
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = pair[1];
+  server.accept();
+  console.log("Shelly connected");
+
+  const backendUrl =
+    (env.REPLIT_WS_URL && String(env.REPLIT_WS_URL)) ||
+    "wss://shelly-ws-collector-sagemcom.replit.app/ws";
+
+  let backend = null;
+  let backendOpen = false;
+
+  // Petite file d’attente locale: messages >10W en attente tant que backend n’est pas "open"
+  const messageQueue = [];
+
+  function sendQueuedMessages() {
+    while (backendOpen && messageQueue.length > 0) {
+      const msg = messageQueue.shift();
+      try {
+        backend.send(msg);
+        console.log("Sent queued message to Replit");
+      } catch (e) {
+        console.error("Send queued failed:", e);
+        break;
+      }
+    }
+  }
+
+  function ensureBackend() {
+    if (backend) return; // déjà en cours d’ouverture ou ouvert
+
+    try {
+      backend = new WebSocket(backendUrl);
+    } catch (e) {
+      console.error("Failed to create backend WS:", e);
+      // purge la queue pour éviter boucles infinies si échec permanent
+      messageQueue.length = 0;
+      return;
+    }
+
+    backend.addEventListener("open", () => {
+      backendOpen = true;
+      console.log("Backend connected");
+      sendQueuedMessages();
+    });
+
+    // RELAY backend → Shelly (RPC/acks/pings)
+    backend.addEventListener("message", (ev) => {
+      try {
+        server.send(ev.data);
+        // console.log("Relayed backend→Shelly");
+      } catch (e) {
+        console.error("Relay backend→Shelly failed:", e);
+      }
+    });
+
+    backend.addEventListener("close", (e) => {
+      console.log("Backend closed:", e.code);
+      backendOpen = false;
+      backend = null;
+    });
+
+    backend.addEventListener("error", (e) => {
+      console.error("Backend error:", e);
+      backendOpen = false;
+      backend = null;
+    });
+  }
+
+  // OUVERTURE IMMÉDIATE DU BACKEND pour casser le deadlock
+  ensureBackend();
+
+  // Shelly → Worker (filtrage) → Replit
+  server.addEventListener("message", (ev) => {
+    // Dans Workers WS, ev.data est normalement une string (texte)
+    let data;
+    try {
+      data = JSON.parse(ev.data);
+    } catch {
+      return; // ignore si non-JSON
+    }
+
+    if (!shouldForwardMessage(data)) {
+      // console.log("Filtered out (≤10W)");
+      return;
+    }
+
+    console.log("Message >10W detected");
+
+    if (backendOpen) {
+      try {
+        backend.send(ev.data);
+        console.log("Sent to Replit");
+      } catch (e) {
+        console.error("Send failed:", e);
+      }
+    } else {
+      // Backend pas encore ouvert → mise en file
+      messageQueue.push(ev.data);
+      console.log("Queued message");
+      // ensureBackend(); // déjà appelé au connect; on n’insiste pas pour éviter doublons
+    }
+  });
+
+  server.addEventListener("close", () => {
+    console.log("Shelly disconnected");
+    if (backend) {
+      try {
+        backend.close(1000, "Shelly closed");
+      } catch {}
+      backend = null;
+      backendOpen = false;
+    }
+    messageQueue.length = 0;
+  });
+
+  server.addEventListener("error", (e) => {
+    console.error("Shelly WS error:", e);
+    if (backend) {
+      try {
+        backend.close(1011, "Shelly error");
+      } catch {}
+      backend = null;
+      backendOpen = false;
+    }
+    messageQueue.length = 0;
+  });
+
+  return new Response(null, { status: 101, webSocket: client });
+}

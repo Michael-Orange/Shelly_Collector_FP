@@ -1,0 +1,172 @@
+export default {
+  async fetch(request, env) {
+    if (request.headers.get("Upgrade") === "websocket") {
+      return handleWebSocket(request, env);
+    }
+    return new Response("Shelly Filter Proxy - WebSocket only", { status: 200 });
+  },
+};
+
+function shouldForwardMessage(data) {
+  const channelsInclude = [0, 1, 2];
+  const powerThreshold = 10;
+
+  if (data && data.params) {
+    for (const ch of channelsInclude) {
+      const sw = data.params[`switch:${ch}`];
+      if (sw && typeof sw.apower === "number" && sw.apower > powerThreshold) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function handleWebSocket(request, env) {
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = pair[1];
+  server.accept();
+  console.log("Shelly connected");
+
+  const backendUrl =
+    (env.REPLIT_WS_URL && String(env.REPLIT_WS_URL)) ||
+    "wss://shelly-ws-collector-sagemcom.replit.app/ws";
+
+  let backend = null;
+  let backendOpen = false;
+  const messageQueue = [];
+  const MAX_QUEUE_SIZE = 50; // ✅ Protection contre queue infinie
+
+  // ✅ Compteurs pour logging optimisé
+  let filteredCount = 0;
+  let forwardedCount = 0;
+
+  // ✅ Fonction sécurisée pour ajouter à la queue
+  function addToQueue(message) {
+    if (messageQueue.length >= MAX_QUEUE_SIZE) {
+      messageQueue.shift(); // Drop le plus ancien
+      console.log(`⚠️ Queue full, dropped oldest message (size: ${messageQueue.length})`);
+    }
+    messageQueue.push(message);
+  }
+
+  function sendQueuedMessages() {
+    while (backendOpen && messageQueue.length > 0) {
+      const msg = messageQueue.shift();
+      try {
+        backend.send(msg);
+        console.log("Sent queued message to Replit");
+      } catch (e) {
+        console.error("Send queued failed:", e);
+        break;
+      }
+    }
+  }
+
+  function ensureBackend() {
+    if (backend) return;
+
+    try {
+      backend = new WebSocket(backendUrl);
+    } catch (e) {
+      console.error("Failed to create backend WS:", e);
+      messageQueue.length = 0;
+      return;
+    }
+
+    backend.addEventListener("open", () => {
+      backendOpen = true;
+      console.log("Backend connected");
+      sendQueuedMessages();
+    });
+
+    backend.addEventListener("message", (ev) => {
+      try {
+        server.send(ev.data);
+        console.log("Relayed backend→Shelly");
+      } catch (e) {
+        console.error("Relay backend→Shelly failed:", e);
+      }
+    });
+
+    backend.addEventListener("close", (e) => {
+      console.log("Backend closed:", e.code);
+      backendOpen = false;
+      backend = null;
+    });
+
+    backend.addEventListener("error", (e) => {
+      console.error("Backend error:", e);
+      backendOpen = false;
+      backend = null;
+    });
+  }
+
+  // ✅ PAS de ensureBackend() ici → Instance Replit reste endormie si pompes OFF
+
+  server.addEventListener("message", (ev) => {
+    let data;
+    let text;
+    
+    try {
+      // Normalisation string/ArrayBuffer
+      text = typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data);
+      data = JSON.parse(text);
+    } catch {
+      return;
+    }
+
+    if (!shouldForwardMessage(data)) {
+      // ✅ Compteur optimisé - log seulement tous les 100 messages filtrés
+      filteredCount++;
+      if (filteredCount % 100 === 0) {
+        console.log(`🔽 100 messages filtered (≤10W) - Total: ${filteredCount}`);
+      }
+      return;
+    }
+
+    // ✅ Message >10W détecté
+    forwardedCount++;
+    console.log(`⚡ Message >10W detected! (#${forwardedCount})`);
+
+    if (backendOpen) {
+      try {
+        backend.send(text);  // ✅ Envoyer text (string homogène)
+        console.log("Sent to Replit");
+      } catch (e) {
+        console.error("Send failed:", e);
+      }
+    } else {
+      addToQueue(text);  // ✅ Utiliser la fonction sécurisée
+      console.log("Queued message");
+      ensureBackend();  // ✅ Connexion SEULEMENT si message >10W
+    }
+  });
+
+  server.addEventListener("close", () => {
+    console.log(`Shelly disconnected - Stats: ${filteredCount} filtered, ${forwardedCount} forwarded`);
+    if (backend) {
+      try {
+        backend.close(1000, "Shelly closed");
+      } catch {}
+      backend = null;
+      backendOpen = false;
+    }
+    messageQueue.length = 0;
+  });
+
+  server.addEventListener("error", (e) => {
+    console.error("Shelly WS error:", e);
+    if (backend) {
+      try {
+        backend.close(1011, "Shelly error");
+      } catch {}
+      backend = null;
+      backendOpen = false;
+    }
+    messageQueue.length = 0;
+  });
+
+  return new Response(null, { status: 101, webSocket: client });
+}

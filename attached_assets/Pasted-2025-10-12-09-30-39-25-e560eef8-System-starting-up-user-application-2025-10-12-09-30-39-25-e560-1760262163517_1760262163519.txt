@@ -1,0 +1,80 @@
+2025-10-12 09:30:39.25
+e560eef8
+System
+starting up user application
+2025-10-12 09:30:39.25
+e560eef8
+System
+forwarding local port 5000 to external port 80 (mapped as 1104)
+2025-10-12 09:30:40.70
+e560eef8
+User
+INFO: Started server process [21]
+2025-10-12 09:30:40.70
+e560eef8
+User
+INFO: Waiting for application startup.
+2025-10-12 09:30:40.70
+e560eef8
+User
+================================================================================
+2025-10-12 09:30:40.70
+e560eef8
+User
+🚀 [2025-10-12 09:30:40.701 UTC] APPLICATION STARTUP (COLD START)
+2025-10-12 09:30:40.70
+e560eef8
+User
+================================================================================
+2025-10-12 09:30:40.89
+e560eef8
+User
+INFO: Application startup complete.
+2025-10-12 09:30:40.89
+e560eef8
+User
+✅ Shelly WS collector started (simple 1min throttling)
+2025-10-12 09:30:40.89
+e560eef8
+User
+✅ Database: PostgreSQL connected
+2025-10-12 09:30:40.89
+e560eef8
+User
+✅ Request logging: ENABLED (detailed)
+2025-10-12 09:30:40.89
+e560eef8
+User
+================================================================================
+2025-10-12 09:30:40.89
+e560eef8
+User
+INFO: Uvicorn running on http://0.0.0.0:5000 (Press CTRL+C to quit)
+2025-10-12 09:30:41.01
+e560eef8
+User
+🔍 [09:30:41.016] HTTP GET /
+2025-10-12 09:30:41.01
+e560eef8
+User
+📍 IP: 127.0.0.1
+2025-10-12 09:30:41.01
+e560eef8
+User
+🌐 User-Agent: Go-http-client/1.1
+2025-10-12 09:30:41.01
+e560eef8
+User
+🔗 Referer: none
+2025-10-12 09:30:41.01
+e560eef8
+User
+📋 Headers: {'host': '127.0.0.1:1104', 'user-agent': 'Go-http-client/1.1', 'accept-encoding': 'gzip', 'server-timing': 'pid1req;dur=1760261441008', 'x-replit-healthcheck': '1', 'x-replit-user-bio': '', 'x-replit-user-id': '', 'x-replit-user-name': '', 'x-replit-user-profile-image': '', 'x-replit-user-roles': '', 'x-replit-user-teams': '', 'x-replit-user-url': ''}
+2025-10-12 09:30:41.01
+e560eef8
+User
+✅ Status: 200 | Duration: 0.68ms
+2025-10-12 09:30:41.01
+e560eef8
+User
+INFO: 127.0.0.1:47594 - "GET / HTTP/1.1" 200 OK
