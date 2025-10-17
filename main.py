@@ -13,7 +13,12 @@ db_pool = None
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Middleware pour logger toutes les requêtes HTTP avec détails complets"""
+    """Middleware pour logger toutes les requêtes HTTP (sauf health checks Replit)"""
+    
+    # Filtrer les health checks Replit (n'ajoutent aucun coût, polluent les logs)
+    if request.headers.get("x-replit-healthcheck"):
+        return await call_next(request)
+    
     start_time = time.time()
     now = datetime.now(timezone.utc)
     
