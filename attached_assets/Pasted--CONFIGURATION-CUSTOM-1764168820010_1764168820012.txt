@@ -1,0 +1,176 @@
+═══════════════════════════════════════════════════════════════════════════
+🎯 CONFIGURATION CUSTOM DOMAIN POUR REPLIT WEBSOCKET
+═══════════════════════════════════════════════════════════════════════════
+
+📋 OBJECTIF
+Configurer un domaine personnalisé pour le serveur Replit afin de contourner
+la protection "replshield" qui bloque les connexions WebSocket depuis 
+Cloudflare Worker.
+
+🔧 PRÉREQUIS
+- Accès à Cloudflare DNS (compte filtreplante.com)
+- Accès au Replit "shelly-ws-collector-sagemcom"
+- Accès au Worker Cloudflare "shelly-filter-proxy"
+
+═══════════════════════════════════════════════════════════════════════════
+ÉTAPE 1 : CONFIGURATION REPLIT
+═══════════════════════════════════════════════════════════════════════════
+
+1.1 Ouvrir le Replit "shelly-ws-collector-sagemcom"
+
+1.2 Aller dans les paramètres :
+    - Cliquer sur l'icône ⚙️ (Settings) en haut à droite
+    - Ou aller dans l'onglet "Deployments"
+
+1.3 Trouver la section "Custom Domains" ou "Domains"
+
+1.4 Ajouter le domaine personnalisé :
+    Domaine suggéré : shelly-collector.filtreplante.com
+    
+1.5 Replit va vous donner des instructions DNS (type CNAME)
+    ⚠️ NOTER CES INFORMATIONS - Vous en aurez besoin pour l'étape 2
+
+═══════════════════════════════════════════════════════════════════════════
+ÉTAPE 2 : CONFIGURATION CLOUDFLARE DNS
+═══════════════════════════════════════════════════════════════════════════
+
+2.1 Se connecter à Cloudflare Dashboard
+
+2.2 Sélectionner le domaine "filtreplante.com"
+
+2.3 Aller dans l'onglet "DNS" → "Records"
+
+2.4 Ajouter un nouvel enregistrement :
+    Type : CNAME
+    Name : shelly-collector
+    Target : [valeur fournie par Replit - généralement *.replit.app ou replit.dev]
+    Proxy status : DNS only (gris, PAS orange)
+    TTL : Auto
+    
+    ⚠️ IMPORTANT : Le proxy Cloudflare (orange) DOIT être DÉSACTIVÉ
+    pour que les WebSockets fonctionnent correctement
+
+2.5 Cliquer "Save"
+
+2.6 Attendre la propagation DNS (1-5 minutes généralement)
+
+═══════════════════════════════════════════════════════════════════════════
+ÉTAPE 3 : VÉRIFICATION DNS
+═══════════════════════════════════════════════════════════════════════════
+
+3.1 Ouvrir un terminal local
+
+3.2 Tester la résolution DNS :
+    nslookup shelly-collector.filtreplante.com
+    
+    OU
+    
+    dig shelly-collector.filtreplante.com
+
+3.3 Vérifier que le domaine pointe vers l'infrastructure Replit
+
+3.4 Tester la connexion HTTPS :
+    curl https://shelly-collector.filtreplante.com
+    
+    Devrait retourner la réponse de votre serveur Replit
+
+═══════════════════════════════════════════════════════════════════════════
+ÉTAPE 4 : MISE À JOUR WORKER CLOUDFLARE
+═══════════════════════════════════════════════════════════════════════════
+
+4.1 Aller dans Cloudflare Dashboard → Workers & Pages
+
+4.2 Ouvrir le Worker "shelly-filter-proxy"
+
+4.3 Aller dans "Settings" → "Variables"
+
+4.4 Option A - Ajouter/Modifier la variable d'environnement :
+    Name : REPLIT_WS_URL
+    Value : wss://shelly-collector.filtreplante.com/ws
+    
+    Option B - Modifier directement dans le code :
+    const backendUrl = 
+      (env.REPLIT_WS_URL && String(env.REPLIT_WS_URL)) ||
+      "wss://shelly-collector.filtreplante.com/ws";
+
+4.5 Déployer la nouvelle version du Worker
+
+═══════════════════════════════════════════════════════════════════════════
+ÉTAPE 5 : TESTS ET VALIDATION
+═══════════════════════════════════════════════════════════════════════════
+
+5.1 Vérifier les logs du Worker Cloudflare :
+    - Aller dans "Observability" → "Real-time Logs"
+    - Déclencher une pompe pour générer un message >10W
+    - Chercher : "🔄 Attempting connection to:"
+    - Vérifier : "✅ Backend connected successfully!"
+
+5.2 Vérifier les logs du serveur Replit :
+    - Chercher : "🔗 Nouvelle connexion WebSocket"
+    - Vérifier l'IP/origine de la connexion
+
+5.3 Vérifier la base de données :
+    - Se connecter au Replit
+    - Ouvrir la console psql ou l'interface DB
+    - Requête : SELECT * FROM shelly_data ORDER BY timestamp DESC LIMIT 5;
+    - Vérifier que de nouvelles données arrivent
+
+5.4 Test complet :
+    - Arrêter toutes les pompes (données ≤10W)
+    - Vérifier logs Worker : "🔽 100 messages filtered"
+    - Démarrer une pompe (>10W)
+    - Vérifier logs Worker : "⚡ Message >10W detected!"
+    - Vérifier logs Worker : "Sent to Replit"
+    - Vérifier DB : Nouvelles entrées avec timestamp récent
+
+═══════════════════════════════════════════════════════════════════════════
+TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════
+
+Problème : "Backend connection error" dans logs Worker
+
+Solution 1 : Vérifier que le proxy Cloudflare est DÉSACTIVÉ (gris)
+  → Dans Cloudflare DNS, éditer l'enregistrement CNAME
+  → Cliquer sur le nuage orange pour le rendre gris
+  → Sauvegarder
+
+Solution 2 : Vérifier le certificat SSL/TLS
+  → Le domaine doit avoir un certificat valide
+  → Replit génère automatiquement un certificat Let's Encrypt
+  → Attendre 5-10 minutes après ajout du domaine
+
+Solution 3 : Vérifier l'URL WebSocket
+  → Doit commencer par wss:// (pas ws://)
+  → Doit se terminer par /ws (votre endpoint WebSocket)
+  → Format : wss://shelly-collector.filtreplante.com/ws
+
+Problème : DNS ne se résout pas
+
+Solution :
+  → Attendre propagation DNS (jusqu'à 24h max, souvent 5-15 min)
+  → Vider le cache DNS local : ipconfig /flushdns (Windows) ou 
+    sudo dscacheutil -flushcache (Mac)
+  → Tester avec un autre réseau ou 4G pour contourner le cache
+
+Problème : "replshield" redirect toujours présent
+
+Solution :
+  → Vérifier que le domaine personnalisé est bien activé dans Replit
+  → Redéployer l'application Replit
+  → S'assurer que le domaine pointe vers le bon déploiement
+
+═══════════════════════════════════════════════════════════════════════════
+RÉSULTAT ATTENDU
+═══════════════════════════════════════════════════════════════════════════
+
+✅ URL stable et professionnelle
+✅ Pas de protection replshield
+✅ Connexions WebSocket fonctionnelles Worker → Replit
+✅ Données Shelly arrivent en base de données
+✅ Logs Worker montrent connexions réussies
+✅ Logs Replit montrent réception des messages
+✅ Solution pérenne (URL ne change jamais)
+
+═══════════════════════════════════════════════════════════════════════════
+DURÉE ESTIMÉE : 15-30 MINUTES (+ temps de propagation DNS)
+═══════════════════════════════════════════════════════════════════════════
