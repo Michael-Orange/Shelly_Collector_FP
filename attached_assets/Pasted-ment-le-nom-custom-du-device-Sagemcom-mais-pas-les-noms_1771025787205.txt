@@ -1,0 +1,239 @@
+ment le nom custom du device ("Sagemcom") mais pas les noms des canaux dans le dropdown de filtres.
+Le dropdown affiche "Canal 0", "Canal 1", "Canal 2" au lieu de "Pompe PR 1", "Pompe PS", "Surpresseur".
+
+CAUSE
+=====
+Le dropdown "Canal" est hardcodé avec des labels statiques. Il ne récupère pas les noms custom depuis l'API.
+
+SOLUTION
+========
+Modifier web/dashboard.py pour :
+1. Charger les configs au démarrage
+2. Remplir le dropdown "Canal" avec les noms custom
+3. Garder les valeurs techniques (switch:0) pour les requêtes API
+
+SPÉCIFICATIONS
+===============
+
+Modifier web/dashboard.py dans la section HTML du dropdown Canal :
+
+AVANT (ligne ~110) :
+<div class="filter-group">
+    <label for="channel-filter">💧 Canal</label>
+    <select id="channel-filter">
+        <option value="">Tous les canaux</option>
+        <option value="switch:0">Canal 0</option>
+        <option value="switch:1">Canal 1</option>
+        <option value="switch:2">Canal 2</option>
+    </select>
+</div>
+
+APRÈS :
+<div class="filter-group">
+    <label for="channel-filter">💧 Canal</label>
+    <select id="channel-filter">
+        <option value="">Tous les canaux</option>
+        <!-- Options chargées dynamiquement depuis l'API -->
+    </select>
+</div>
+
+Modifier web/dashboard.py dans le JavaScript (après DOMContentLoaded) :
+
+Ajouter cette nouvelle fonction après loadCycles() :
+
+async function loadChannelOptions() {
+    try {
+        // Récupérer les configs
+        const response = await fetch('/api/config/devices');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const select = document.getElementById('channel-filter');
+        
+        // Garder "Tous les canaux"
+        select.innerHTML = '<option value="">Tous les canaux</option>';
+        
+        // Si on a des devices avec configs
+        if (data.devices && data.devices.length > 0) {
+            // Récupérer le device_id du dashboard (depuis les données chargées ou config)
+            // Pour l'instant, on prend le premier device (à améliorer si multi-device)
+            const device = data.devices[0];
+            const deviceId = device.device_id;
+            const channelNames = device.channel_names || {};
+            
+            // Ajouter les options avec noms custom
+            device.channels.forEach(channel => {
+                const option = document.createElement('option');
+                option.value = channel; // Valeur technique (switch:0)
+                option.textContent = channelNames[channel] || channel; // Nom custom ou fallback
+                select.appendChild(option);
+            });
+        } else {
+            // Fallback si pas de configs : options par défaut
+            ['switch:0', 'switch:1', 'switch:2'].forEach(ch => {
+                const option = document.createElement('option');
+                option.value = ch;
+                option.textContent = ch;
+                select.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.error('Error loading channel options:', e);
+        // Fallback en cas d'erreur
+        const select = document.getElementById('channel-filter');
+        select.innerHTML = `
+            <option value="">Tous les canaux</option>
+            <option value="switch:0">switch:0</option>
+            <option value="switch:1">switch:1</option>
+            <option value="switch:2">switch:2</option>
+        `;
+    }
+}
+
+Modifier DOMContentLoaded pour appeler loadChannelOptions() :
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Définir dates par défaut (45 derniers jours)
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 45);
+    
+    document.getElementById('start-date').valueAsDate = startDate;
+    document.getElementById('end-date').valueAsDate = today;
+    
+    // Charger les options des canaux avec noms custom
+    loadChannelOptions(); // 🆕 AJOUTER CETTE LIGNE
+    
+    // Charger données
+    loadCycles();
+});
+
+AMÉLIORATION OPTIONNELLE : Support multi-device
+================================================
+
+Si tu as plusieurs devices, tu veux que le dropdown "Canal" change selon le device sélectionné.
+
+Modifier le HTML pour ajouter un dropdown "Device" (si pas déjà fait) :
+
+<div class="filter-group">
+    <label for="device-filter">🔌 Device</label>
+    <select id="device-filter" onchange="updateChannelOptions()">
+        <option value="">Tous les devices</option>
+        <!-- Options chargées dynamiquement -->
+    </select>
+</div>
+
+Ajouter cette fonction JavaScript :
+
+async function loadDeviceOptions() {
+    try {
+        const response = await fetch('/api/config/devices');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const select = document.getElementById('device-filter');
+        
+        select.innerHTML = '<option value="">Tous les devices</option>';
+        
+        data.devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.device_id;
+            option.textContent = device.device_name || device.device_id;
+            select.appendChild(option);
+        });
+    } catch (e) {
+        console.error('Error loading device options:', e);
+    }
+}
+
+function updateChannelOptions() {
+    // Recharger les options de canaux selon le device sélectionné
+    loadChannelOptions();
+}
+
+Modifier loadChannelOptions() pour filtrer selon le device sélectionné :
+
+async function loadChannelOptions() {
+    try {
+        const response = await fetch('/api/config/devices');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const select = document.getElementById('channel-filter');
+        const deviceFilter = document.getElementById('device-filter');
+        const selectedDeviceId = deviceFilter ? deviceFilter.value : '';
+        
+        select.innerHTML = '<option value="">Tous les canaux</option>';
+        
+        if (data.devices && data.devices.length > 0) {
+            // Filtrer par device si sélectionné
+            const devices = selectedDeviceId 
+                ? data.devices.filter(d => d.device_id === selectedDeviceId)
+                : data.devices;
+            
+            // Pour chaque device (ou juste celui sélectionné)
+            devices.forEach(device => {
+                const channelNames = device.channel_names || {};
+                
+                device.channels.forEach(channel => {
+                    const option = document.createElement('option');
+                    option.value = channel;
+                    
+                    // Si multi-device, préfixer avec le nom du device
+                    const displayName = channelNames[channel] || channel;
+                    option.textContent = data.devices.length > 1 && !selectedDeviceId
+                        ? `[${device.device_name || device.device_id}] ${displayName}`
+                        : displayName;
+                    
+                    select.appendChild(option);
+                });
+            });
+        }
+    } catch (e) {
+        console.error('Error loading channel options:', e);
+    }
+}
+
+Appeler loadDeviceOptions() au chargement :
+
+document.addEventListener('DOMContentLoaded', () => {
+    // ... dates ...
+    
+    loadDeviceOptions();  // 🆕 Charger devices
+    loadChannelOptions(); // Charger canaux
+    loadCycles();
+});
+
+TESTS
+=====
+1. ✅ Recharger /dashboard
+2. ✅ Dropdown "Canal" affiche :
+   - "Tous les canaux"
+   - "Pompe PR 1" (au lieu de "Canal 0")
+   - "Pompe PS" (au lieu de "Canal 2")
+   - "Surpresseur" (au lieu de "Canal 3")
+3. ✅ Sélectionner "Pompe PR 1" → filtre sur switch:0 (valeur technique)
+4. ✅ Tableau affiche les cycles filtrés
+5. ✅ Les noms custom s'affichent aussi dans le tableau
+
+RÉSULTAT ATTENDU
+================
+Dropdown "Canal" :
+┌──────────────────────┐
+│ Tous les canaux     ▼│
+├──────────────────────┤
+│ Pompe PR 1           │ ← Au lieu de "Canal 0"
+│ Ex: Pompe PR         │ ← Si pas de nom, affiche "switch:1"
+│ Pompe PS             │ ← Au lieu de "Canal 2"
+│ Surpresseur          │ ← Au lieu de "Canal 3"
+└──────────────────────┘
+
+La valeur technique (switch:0) est utilisée pour filtrer l'API, mais l'affichage montre le nom custom.
+🎯 RÉSUMÉ DU PROBLÈME
+Avant :
+Dropdown hardcodé avec "Canal 0", "Canal 1", "Canal 2"
+Noms custom ignorés
+Après le fix :
+Dropdown chargé dynamiquement depuis /api/config/devices
+Affiche "Pompe PR 1", "Pompe PS", "Surpresseur"
+Valeurs techniques (switch:0) utilisées en backend
