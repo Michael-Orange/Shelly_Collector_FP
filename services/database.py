@@ -1,6 +1,6 @@
 import asyncpg
 from datetime import datetime, timedelta, timezone
-from typing import Dict
+from typing import Dict, Optional
 
 
 async def create_db_pool(database_url: str, min_size: int, max_size: int):
@@ -16,7 +16,7 @@ async def create_db_pool(database_url: str, min_size: int, max_size: int):
         raise
 
 
-async def close_db_pool(pool: asyncpg.Pool):
+async def close_db_pool(pool: Optional[asyncpg.Pool]):
     if pool:
         try:
             await pool.close()
@@ -41,7 +41,7 @@ def should_write(
 
 
 async def insert_power_log(
-    pool: asyncpg.Pool,
+    pool: Optional[asyncpg.Pool],
     device_id: str,
     channel: int,
     apower: float,

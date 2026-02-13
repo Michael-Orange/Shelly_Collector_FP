@@ -6,24 +6,43 @@ The primary goal is to monitor power channels and log their consumption data wit
 
 # Recent Changes
 
-**2025-10-11 (Latest)**: Complete system rewrite - Ultra-simplified architecture:
-- **🔧 REMOVED**: All timers, stop detection, START/STOP logic, delta filtering, periodic sampling
-- **🔧 NEW SYSTEM**: Simple 1-minute throttling per channel (last_write_time dictionary)
-- **🔧 Write logic**: If >1 minute since last write → write to DB with reason "sample"
-- **🔧 Code reduction**: From 321 lines (complex timer system) → 110 lines (simple throttling)
-- **🔧 Backup**: Old system saved in main_old.py
-- **⚠️ Note**: No automatic 0W detection - would require Cloudflare to send ≤10W messages
-- **Result**: Drastically simplified codebase, easier maintenance, predictable behavior
+**2026-02-13 (Latest)**: Modular architecture refactoring:
+- **Refactored** from single `main.py` (166 lines) into modular structure
+- **New**: `config.py` - Centralized configuration (DB pool, throttle interval, future dashboard config)
+- **New**: `services/database.py` - DB pool management, throttle logic (`should_write`), insert function
+- **New**: `models/schemas.py` - Pydantic `PowerLogData` model (prepared for future dashboard)
+- **Refactored**: `main.py` (~120 lines) - Orchestration only (middleware, routes, startup/shutdown)
+- **Zero behavioral changes**: All RPC bootstrap, throttle keys, channel parsing, logging preserved exactly
+- **Architect review**: Timezone bug caught and fixed (UTC consistency maintained)
+
+**2025-10-11**: Complete system rewrite - Ultra-simplified architecture:
+- Simple 1-minute throttling per channel (last_write_time dictionary)
+- Code reduction: From 321 lines → 110 lines (simple throttling)
 
 **2025-10-11**: Cost optimization - reduced resource usage:
-- **🔧 PostgreSQL pool**: Reduced max_size from 10 → 3 connections (lightweight usage pattern)
-- **Result**: ~30-40% cost reduction on PostgreSQL + compute units while maintaining data quality
+- PostgreSQL pool: Reduced max_size from 10 → 3 connections
 
 # User Preferences
 
-Preferred communication style: Simple, everyday language.
+Preferred communication style: Simple, everyday language (French).
 
-# System Architecture
+# Project Architecture
+
+## File Structure
+
+```
+shelly_collector_fp/
+├── main.py                    # FastAPI app, middleware, WebSocket route, startup/shutdown (~120 lines)
+├── config.py                  # Centralized configuration (DB, throttle, dashboard constants)
+├── services/
+│   ├── __init__.py
+│   └── database.py            # DB pool (create/close), should_write() throttle, insert_power_log()
+├── models/
+│   ├── __init__.py
+│   └── schemas.py             # Pydantic PowerLogData model (for future dashboard)
+├── pyproject.toml              # Python dependencies
+└── replit.md                   # This file
+```
 
 ## Core Framework & Server
 - **FastAPI** web framework with WebSocket support
@@ -35,42 +54,28 @@ Preferred communication style: Simple, everyday language.
 
 **Ultra-Simple Throttling System**:
 
-**Cloudflare Prefiltering** (upstream):
-- Filters messages to >10W only on valid channels
+**Cloudflare Worker Prefiltering** (upstream):
+- Worker URL: `wss://shelly-filter-proxy.michael-orange09.workers.dev`
+- Filters messages to >10W only on valid channels (0, 1, 2)
+- Lazy connection: Only connects to Replit when >10W detected (cost optimization)
 - Server receives ONLY relevant messages (active equipment)
-- All received messages = equipment is running
 
-**1-Minute Throttling**:
-- Single dictionary: `last_write_time = {}` tracks last write per device/channel
+**1-Minute Throttling** (in `services/database.py`):
+- `should_write()` function with state key format: `{device_id}_ch{channel_int}`
 - On message arrival: If >1 minute since last write → write to DB
 - All writes labeled as "sample"
-- No complex state management, no timers, no delta calculations
 
-**Write Logic**:
-- Parse incoming JSON for apower, voltage, current, energy_total
-- Check `last_write_time[device_channel]`
-- If >60 seconds elapsed OR first message → write to PostgreSQL
-- Update `last_write_time[device_channel] = now`
-
-**Behavior**:
-- Equipment ON (>10W) → Write every minute
-- Equipment OFF (≤10W) → Cloudflare blocks messages → No writes
-- **Note**: No automatic 0W writes (would require Cloudflare config change)
-
-**Rationale**: Maximum simplicity. One minute is sufficient granularity for monitoring pump/equipment usage patterns. Eliminates all bugs related to timers, state management, and race conditions.
+**RPC Bootstrap** (in `main.py`):
+- Sent via `send_text()` (NOT `send_json()`) with `"src":"collector"`
+- Command 1: `NotifyStatus` with `enable: true` to start streaming
+- Command 2: `Shelly.GetStatus` to retrieve immediate status
+- Critical for Shelly to begin sending data
 
 ## State Management
 
 **Minimal in-memory state** using Python dictionary:
 - `last_write_time = {}`: Stores last write timestamp per device/channel
 - Format: `{"deviceid_ch0": datetime, "deviceid_ch2": datetime, ...}`
-
-**Trade-offs**: 
-- ✅ Extremely simple implementation
-- ✅ No bugs possible (no complex logic)
-- ✅ Predictable behavior (always 1 write/min when active)
-- ⚠️ State lost on restart (acceptable - next message will write immediately)
-- ⚠️ More DB writes than old delta/sampling system (but simpler and more predictable)
 
 ## Data Storage
 
@@ -80,31 +85,28 @@ Preferred communication style: Simple, everyday language.
 - Indexed on timestamp and (device_id, channel) for efficient queries
 - Async inserts via asyncpg connection pool (min=1, max=3)
 
-**Design choice rationale**:
-- PostgreSQL for reliable persistence on Replit Autoscale
-- Free tier PostgreSQL database provided by Replit
-- Async inserts maintain performance without blocking WebSocket processing
-- Small connection pool (max=3) sufficient for lightweight usage pattern
-
 ## Message Processing Pipeline
 
-1. **WebSocket connection** accepted from Shelly device
-2. **RPC bootstrap commands** sent immediately:
-   - `NotifyStatus` with `enable: true` to start streaming
-   - `Shelly.GetStatus` to retrieve immediate status
-3. **Cloudflare prefiltering** (upstream): Only >10W messages on valid channels reach server
+1. **Shelly device** connects to Cloudflare Worker via outbound WebSocket
+2. **Cloudflare Worker** filters >10W messages, lazy-connects to Replit
+3. **WebSocket connection** accepted, RPC bootstrap commands sent
 4. **JSON-RPC message parsing** from `params.switch:{X}` format
-5. **Throttling check**: If >1 minute since last write → proceed
-6. **PostgreSQL insert** with async connection pooling
-7. **Update state**: `last_write_time[key] = now`
+5. **Channel parsing**: `int(key.split(':')[1])` → throttle check with `_ch{int}` key
+6. **Throttling check**: `should_write()` → If >1 minute since last write → proceed
+7. **PostgreSQL insert**: `insert_power_log()` with `f"switch:{channel}"` reconstruction
+8. **Update state**: `last_write_time[key] = now`
 
-## Configuration
+## Configuration (config.py)
 
-**Connection pool** (optimized for cost):
-- `min_size=1, max_size=3` - Lightweight usage pattern
-
-**Environment variables** (auto-configured by Replit):
-- `DATABASE_URL` - PostgreSQL connection string
+```python
+DATABASE_URL = os.getenv("DATABASE_URL")
+DB_POOL_MIN_SIZE = 1
+DB_POOL_MAX_SIZE = 3
+THROTTLE_INTERVAL_SECONDS = 60
+GAP_THRESHOLD_MINUTES = 3        # Future dashboard
+MIN_CYCLE_DURATION_MINUTES = 2   # Future dashboard
+DEFAULT_DAYS_HISTORY = 45        # Future dashboard
+```
 
 # External Dependencies
 
@@ -112,24 +114,27 @@ Preferred communication style: Simple, everyday language.
 - **fastapi** - Web framework for HTTP and WebSocket endpoints
 - **uvicorn** - ASGI server for running FastAPI application
 - **asyncpg** - Async PostgreSQL driver for database operations
+- **pydantic** - Data validation (included with FastAPI)
 
 ## External Services & Integrations
 
-- **Shelly Smart Devices** - IoT switches/relays that initiate outbound WebSocket connections
-  - Protocol: WebSocket (wss:// or ws://)
+- **Shelly Smart Devices** - IoT switches/relays (Shelly Pro 4PM)
+  - Protocol: WebSocket (wss://)
   - Message format: JSON-RPC NotifyStatus messages
-  - Connection model: Device connects TO server (outbound from device perspective)
-  
+  - Connection: Device → Cloudflare Worker → Replit
+
+- **Cloudflare Worker** - Message filtering proxy
+  - URL: `wss://shelly-filter-proxy.michael-orange09.workers.dev`
+  - Filters >10W messages on channels 0, 1, 2
+  - Lazy backend connection (cost optimization)
+
 - **Replit Hosting Platform**
-  - Deployment: Autoscale (stateless, cost-effective)
-  - Provides SSL/TLS termination for wss:// connections
-  - Public URL format: `wss://<repl-name>.<username>.repl.co/ws`
-  - Free PostgreSQL database for data persistence
+  - Deployment: Autoscale
+  - Production URL: `wss://shelly-ws-collector-sagemcom.replit.app/ws`
 
 ## Deployment Commands
 
 ```bash
-uv add fastapi uvicorn asyncpg
 uvicorn main:app --host 0.0.0.0 --port 5000
 ```
 
@@ -155,5 +160,4 @@ CREATE INDEX idx_power_logs_device_channel ON power_logs(device_id, channel);
 ## Shelly Device Configuration
 
 - Enable: Settings → Connectivity → Outbound Websocket
-- Server address: `wss://<your-repl>.<your-user>.repl.co/ws`
-- Alternative for testing: `ws://` (unencrypted)
+- Server address: `wss://shelly-filter-proxy.michael-orange09.workers.dev`
