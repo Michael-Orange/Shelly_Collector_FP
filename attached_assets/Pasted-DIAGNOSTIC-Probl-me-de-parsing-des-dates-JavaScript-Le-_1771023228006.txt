@@ -1,0 +1,160 @@
+DIAGNOSTIC : Problème de parsing des dates JavaScript
+Le problème vient du formatage des dates dans le dashboard. Le new Date() JavaScript ne parse pas correctement les dates renvoyées par l'API.
+🛠️ FIX RAPIDE
+Copie-colle ce bloc dans Replit Agent :
+PROBLÈME
+========
+Le dashboard affiche "Invalid Date" pour toutes les dates.
+Cause : Le parsing JavaScript des timestamps ISO ne fonctionne pas correctement.
+
+SOLUTION
+========
+Modifier le fichier web/dashboard.py dans la fonction renderTable() du JavaScript.
+
+Remplacer la section de parsing des dates (lignes ~380-400) par ce code corrigé :
+
+function renderTable(cycles) {
+    const tbody = document.getElementById('cycles-tbody');
+    tbody.innerHTML = '';
+    
+    cycles.forEach(cycle => {
+        const row = document.createElement('tr');
+        
+        // Canal
+        const channelClass = 'channel-' + cycle.channel.replace(':', '-');
+        const channelCell = `<td><span class="channel-badge ${channelClass}">${cycle.channel}</span></td>`;
+        
+        // ✅ FIX : Parser les dates ISO correctement
+        // Enlever le 'Z' et créer un objet Date explicite
+        let startDate;
+        try {
+            startDate = new Date(cycle.start_time);
+            // Vérifier si la date est valide
+            if (isNaN(startDate.getTime())) {
+                throw new Error('Invalid date');
+            }
+        } catch (e) {
+            console.error('Error parsing start_time:', cycle.start_time, e);
+            startDate = new Date(); // Fallback
+        }
+        
+        // Date (format DD/MM/YYYY)
+        const day = String(startDate.getUTCDate()).padStart(2, '0');
+        const month = String(startDate.getUTCMonth() + 1).padStart(2, '0');
+        const year = startDate.getUTCFullYear();
+        const dateStr = `${day}/${month}/${year}`;
+        
+        // Heure démarrage (format HH:MM)
+        const startHours = String(startDate.getUTCHours()).padStart(2, '0');
+        const startMinutes = String(startDate.getUTCMinutes()).padStart(2, '0');
+        const startTimeStr = `${startHours}h${startMinutes}`;
+        
+        // Heure arrêt
+        let endTimeStr;
+        if (cycle.is_ongoing) {
+            endTimeStr = '<span class="ongoing">En cours ⚡</span>';
+        } else if (cycle.end_time) {
+            try {
+                const endDate = new Date(cycle.end_time);
+                if (isNaN(endDate.getTime())) {
+                    throw new Error('Invalid date');
+                }
+                const endHours = String(endDate.getUTCHours()).padStart(2, '0');
+                const endMinutes = String(endDate.getUTCMinutes()).padStart(2, '0');
+                endTimeStr = `${endHours}h${endMinutes}`;
+            } catch (e) {
+                console.error('Error parsing end_time:', cycle.end_time, e);
+                endTimeStr = '-';
+            }
+        } else {
+            endTimeStr = '-';
+        }
+        
+        // Durée
+        const durationStr = `${cycle.duration_minutes} min`;
+        
+        // Puissance
+        const powerStr = `${cycle.avg_power_w} W`;
+        
+        row.innerHTML = `
+            ${channelCell}
+            <td>${dateStr}</td>
+            <td>${startTimeStr}</td>
+            <td>${endTimeStr}</td>
+            <td>${durationStr}</td>
+            <td>${powerStr}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+AUSSI : Mettre à jour la fonction exportCSV() de la même manière (lignes ~450-480) :
+
+function exportCSV() {
+    if (!currentData || currentData.cycles.length === 0) {
+        alert('Aucune donnée à exporter');
+        return;
+    }
+    
+    // Construire CSV (format français : point-virgule)
+    let csv = 'Canal;Date;Heure démarrage;Heure arrêt;Durée (min);Puissance moyenne (W);Statut\n';
+    
+    currentData.cycles.forEach(cycle => {
+        // Parser date démarrage
+        const startDate = new Date(cycle.start_time);
+        const day = String(startDate.getUTCDate()).padStart(2, '0');
+        const month = String(startDate.getUTCMonth() + 1).padStart(2, '0');
+        const year = startDate.getUTCFullYear();
+        const dateStr = `${day}/${month}/${year}`;
+        
+        const startHours = String(startDate.getUTCHours()).padStart(2, '0');
+        const startMinutes = String(startDate.getUTCMinutes()).padStart(2, '0');
+        const startTimeStr = `${startHours}h${startMinutes}`;
+        
+        let endTimeStr = '';
+        let status = 'Terminé';
+        if (cycle.is_ongoing) {
+            endTimeStr = '-';
+            status = 'En cours';
+        } else if (cycle.end_time) {
+            const endDate = new Date(cycle.end_time);
+            const endHours = String(endDate.getUTCHours()).padStart(2, '0');
+            const endMinutes = String(endDate.getUTCMinutes()).padStart(2, '0');
+            endTimeStr = `${endHours}h${endMinutes}`;
+        } else {
+            endTimeStr = '-';
+        }
+        
+        csv += `${cycle.channel};${dateStr};${startTimeStr};${endTimeStr};${cycle.duration_minutes};${cycle.avg_power_w};${status}\n`;
+    });
+    
+    // Télécharger
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `cycles_pompes_filtreplante_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+}
+
+POURQUOI CE FIX
+===============
+1. toLocaleDateString('fr-SN') ne fonctionne pas toujours selon le navigateur/système
+2. On parse manuellement les dates en utilisant getUTC*() pour être sûr du format
+3. On ajoute un try/catch pour logger les erreurs et éviter les crashes
+4. Format manuel : DD/MM/YYYY et HHhMM (ex: 14h30) qui est plus lisible
+
+TESTS
+=====
+1. Rafraîchir le dashboard après le fix
+2. Les dates doivent s'afficher correctement (ex: 27/11/2025)
+3. Les heures doivent s'afficher correctement (ex: 14h30)
+4. L'export CSV doit fonctionner avec le bon format
+🔍 EXPLICATION DU PROBLÈME
+Cause : La méthode JavaScript toLocaleDateString('fr-SN') n'est pas supportée par tous les navigateurs ou retourne un format incompatible.
+Solution : Parser manuellement les dates avec getUTCDate(), getUTCMonth(), etc. pour avoir un contrôle total sur le format.
+✅ APRÈS LE FIX
+Tu devrais voir :
+Date : 27/11/2025 (format DD/MM/YYYY)
+Démarrage : 14h30 (format HHhMM)
+Arrêt : 14h58 ou "En cours ⚡"
