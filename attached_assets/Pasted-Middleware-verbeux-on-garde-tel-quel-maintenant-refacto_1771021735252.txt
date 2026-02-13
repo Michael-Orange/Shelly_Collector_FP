@@ -1,0 +1,429 @@
+Middleware verbeux → on garde tel quel maintenant (refacto future possible)
+Pydantic schemas → préparation pour le dashboard (pas utilisé dans WS pour l'instant)
+Config dashboard → anticipation intelligente
+📋 BRIEF 1 CORRIGÉ
+Copie-colle ce bloc dans Replit Agent :
+CONTEXTE
+========
+Application Shelly_Collector_FP actuellement dans un seul fichier main.py (166 lignes).
+Stack : FastAPI + asyncpg + PostgreSQL + WebSocket pour collecte données Shelly Pro 4PM.
+Objectif : Restructurer l'architecture AVANT d'ajouter le dashboard pour garantir la maintenabilité.
+
+⚠️ CONTRAINTE CRITIQUE : L'application doit continuer à fonctionner exactement comme avant.
+Aucune feature ajoutée, aucun comportement modifié. Juste réorganiser le code existant.
+Tous les tests de connexion WebSocket et d'insertion DB doivent passer après refacto.
+
+⚠️ IMPORTANT : Conserver les commandes RPC bootstrap envoyées à la connexion WebSocket
+(NotifyStatus enable et Shelly.GetStatus) pour que le device Shelly commence à envoyer des données.
+
+OBJECTIF
+========
+Refactoriser l'application en architecture modulaire propre :
+- Séparer configuration, services, modèles
+- Rendre le code testable et réutilisable
+- Préparer l'ajout futur du dashboard (Temps 2)
+- Garder main.py < 100 lignes (orchestration seulement)
+
+SPÉCIFICATIONS
+===============
+
+1. STRUCTURE DE DOSSIERS À CRÉER
+---------------------------------
+shelly_collector_fp/
+├── main.py                    (refactorisé, ~80-100 lignes)
+├── config.py                  (nouveau, ~30 lignes)
+├── services/
+│   ├── __init__.py           (nouveau, vide ou exports)
+│   └── database.py           (nouveau, ~100 lignes)
+└── models/
+    ├── __init__.py           (nouveau, vide ou exports)
+    └── schemas.py            (nouveau, ~40 lignes)
+
+2. FICHIER : config.py
+----------------------
+Créer dans le dossier racine à côté de main.py.
+
+Contenu :
+
+import os
+
+# Database
+DATABASE_URL = os.getenv("DATABASE_URL")
+DB_POOL_MIN_SIZE = 1
+DB_POOL_MAX_SIZE = 3
+
+# Application
+THROTTLE_INTERVAL_SECONDS = 60
+HEALTH_CHECK_PATHS = ["/", "/health"]
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Future dashboard config
+GAP_THRESHOLD_MINUTES = 3
+MIN_CYCLE_DURATION_MINUTES = 2
+DEFAULT_DAYS_HISTORY = 45
+
+Pourquoi : Centraliser toute la configuration en un seul endroit, faciliter les ajustements futurs.
+
+3. FICHIER : models/schemas.py
+-------------------------------
+Créer le dossier models/ avec __init__.py vide.
+
+Contenu de schemas.py :
+
+from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
+
+class PowerLogData(BaseModel):
+    """Modèle de données pour un log de consommation électrique Shelly"""
+    device_id: str = Field(..., description="ID unique du device Shelly")
+    channel: str = Field(..., description="Canal de l'appareil (ex: switch:0)")
+    apower_w: float = Field(..., ge=0, description="Puissance active en Watts")
+    voltage_v: float = Field(..., ge=0, description="Tension en Volts")
+    current_a: float = Field(..., ge=0, description="Courant en Ampères")
+    energy_total_wh: float = Field(..., ge=0, description="Énergie totale cumulée en Wh")
+    timestamp: datetime = Field(..., description="Timestamp de la mesure")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "device_id": "shellypro4pm-a0dd6c9ef474",
+                "channel": "switch:1",
+                "apower_w": 430.5,
+                "voltage_v": 230.0,
+                "current_a": 1.87,
+                "energy_total_wh": 15420.0,
+                "timestamp": "2026-02-13T14:30:00Z"
+            }
+        }
+
+Note : Ces schemas ne sont PAS utilisés dans le WebSocket handler actuel (parsing JSON direct).
+Ils sont préparés pour le dashboard (Temps 2) et futures validations.
+
+4. FICHIER : services/database.py
+----------------------------------
+Créer le dossier services/ avec __init__.py vide.
+
+Contenu de database.py :
+
+import asyncpg
+from datetime import datetime
+from typing import Dict, Optional
+
+async def create_db_pool(database_url: str, min_size: int, max_size: int):
+    """
+    Crée et retourne un pool de connexions PostgreSQL.
+    
+    Args:
+        database_url: URL de connexion PostgreSQL
+        min_size: Taille minimale du pool
+        max_size: Taille maximale du pool
+        
+    Returns:
+        asyncpg.Pool: Pool de connexions
+        
+    Raises:
+        Exception: Si la connexion échoue
+    """
+    try:
+        pool = await asyncpg.create_pool(
+            database_url,
+            min_size=min_size,
+            max_size=max_size
+        )
+        print("✅ Database pool created successfully", flush=True)
+        return pool
+    except Exception as e:
+        print(f"❌ Failed to create database pool: {e}", flush=True)
+        raise
+
+async def close_db_pool(pool: asyncpg.Pool):
+    """Ferme proprement le pool de connexions."""
+    if pool:
+        try:
+            await pool.close()
+            print("✅ Database pool closed", flush=True)
+        except Exception as e:
+            print(f"⚠️ Error closing pool: {e}", flush=True)
+
+def should_throttle(
+    last_write_time: Dict[str, datetime],
+    device_id: str,
+    channel: str,
+    throttle_seconds: int,
+    current_time: datetime
+) -> bool:
+    """
+    Détermine si un enregistrement doit être throttlé (ignoré).
+    
+    Args:
+        last_write_time: Dictionnaire des dernières écritures {key: timestamp}
+        device_id: ID du device
+        channel: Canal
+        throttle_seconds: Intervalle de throttling en secondes
+        current_time: Timestamp actuel
+        
+    Returns:
+        bool: True si doit throttle, False sinon
+    """
+    key = f"{device_id}_{channel}"
+    
+    if key not in last_write_time:
+        last_write_time[key] = current_time
+        return False
+    
+    elapsed = (current_time - last_write_time[key]).total_seconds()
+    
+    if elapsed >= throttle_seconds:
+        last_write_time[key] = current_time
+        return False
+    
+    return True
+
+async def insert_power_log(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    apower_w: float,
+    voltage_v: float,
+    current_a: float,
+    energy_total_wh: float,
+    timestamp: datetime
+) -> bool:
+    """
+    Insère un log de consommation électrique dans la base de données.
+    
+    Args:
+        pool: Pool de connexions asyncpg
+        device_id, channel, apower_w, voltage_v, current_a, energy_total_wh, timestamp: Données à insérer
+        
+    Returns:
+        bool: True si insertion réussie, False sinon
+    """
+    # Arrondir le timestamp à la minute
+    rounded_timestamp = timestamp.replace(second=0, microsecond=0)
+    
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO power_logs 
+                (timestamp, device_id, channel, apower_w, voltage_v, current_a, energy_total_wh)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                rounded_timestamp,
+                device_id,
+                channel,
+                apower_w,
+                voltage_v,
+                current_a,
+                energy_total_wh
+            )
+        return True
+    except Exception as e:
+        print(f"❌ Error inserting log: {e}", flush=True)
+        return False
+
+5. FICHIER : main.py (REFACTORISÉ)
+-----------------------------------
+Réduire main.py à l'orchestration uniquement.
+
+⚠️ ATTENTION SPÉCIALE : Conserver les commandes RPC bootstrap envoyées après websocket.accept() :
+- Commande 1 : NotifyStatus enable (pour activer les notifications)
+- Commande 2 : Shelly.GetStatus (pour obtenir l'état initial)
+
+Ces commandes sont CRITIQUES pour que le Shelly commence à envoyer des données.
+
+Structure cible du main.py refactorisé :
+
+from fastapi import FastAPI, WebSocket, Request
+from fastapi.responses import PlainTextResponse
+from datetime import datetime
+import json
+import time
+
+# Imports des modules créés
+import config
+from services.database import create_db_pool, close_db_pool, should_throttle, insert_power_log
+
+app = FastAPI()
+
+# Variables globales
+db_pool = None
+last_write_time = {}
+
+# MIDDLEWARE : COPIER EXACTEMENT le middleware existant depuis l'ancien main.py
+# Ne rien changer aux logs, garder le filtrage des health checks
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    # [COPIER LE CONTENU EXACT DU MIDDLEWARE EXISTANT]
+    # Doit inclure : détection cold start, logging IP/user-agent, filtrage health checks, etc.
+    pass
+
+# ROUTE HEALTH CHECK
+@app.get("/")
+async def health_check():
+    return PlainTextResponse("Shelly WebSocket Collector is running")
+
+# ROUTE WEBSOCKET
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print(f"✅ WebSocket connection accepted", flush=True)
+    
+    # ⚠️ CRITICAL : Envoyer les commandes RPC bootstrap
+    # Ces commandes doivent être envoyées IMMÉDIATEMENT après accept()
+    try:
+        # Commande 1 : Activer NotifyStatus
+        await websocket.send_json({
+            "id": 1,
+            "method": "NotifyStatus",
+            "params": {"enable": True}
+        })
+        print("📤 Sent: NotifyStatus enable", flush=True)
+        
+        # Commande 2 : Obtenir l'état initial
+        await websocket.send_json({
+            "id": 2,
+            "method": "Shelly.GetStatus"
+        })
+        print("📤 Sent: Shelly.GetStatus", flush=True)
+    except Exception as e:
+        print(f"❌ Error sending bootstrap commands: {e}", flush=True)
+    
+    # Boucle de réception des messages
+    try:
+        while True:
+            data = await websocket.receive_text()
+            
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                print(f"⚠️ Invalid JSON received", flush=True)
+                continue
+            
+            # Vérifier structure message Shelly
+            if message.get("method") != "NotifyStatus" or "params" not in message:
+                continue
+            
+            params = message["params"]
+            device_id = message.get("src", "unknown")
+            current_time = datetime.utcnow()
+            
+            # Traiter chaque switch
+            for key, value in params.items():
+                if not key.startswith("switch:"):
+                    continue
+                
+                channel = key
+                apower = value.get("apower")
+                
+                if apower is None:
+                    continue
+                
+                # Throttling
+                if should_throttle(
+                    last_write_time,
+                    device_id,
+                    channel,
+                    config.THROTTLE_INTERVAL_SECONDS,
+                    current_time
+                ):
+                    print(f"⏭️ Throttled: {device_id} {channel}", flush=True)
+                    continue
+                
+                # Insertion en DB
+                success = await insert_power_log(
+                    db_pool,
+                    device_id,
+                    channel,
+                    apower,
+                    value.get("voltage", 0.0),
+                    value.get("current", 0.0),
+                    value.get("aenergy", {}).get("total", 0.0),
+                    current_time
+                )
+                
+                if success:
+                    print(f"✅ Logged: {device_id} {channel} {apower}W", flush=True)
+    
+    except Exception as e:
+        print(f"❌ WebSocket error: {e}", flush=True)
+    finally:
+        print(f"🔌 WebSocket disconnected", flush=True)
+
+# STARTUP / SHUTDOWN
+@app.on_event("startup")
+async def startup():
+    global db_pool
+    print("🚀 Starting Shelly Collector...", flush=True)
+    db_pool = await create_db_pool(
+        config.DATABASE_URL,
+        config.DB_POOL_MIN_SIZE,
+        config.DB_POOL_MAX_SIZE
+    )
+
+@app.on_event("shutdown")
+async def shutdown():
+    print("🛑 Shutting down...", flush=True)
+    await close_db_pool(db_pool)
+
+Objectif : main.py doit faire ~90-100 lignes (un peu plus à cause des commandes bootstrap), lisible, orchestration pure.
+
+RÈGLES DE MIGRATION STRICTES
+=============================
+1. ⚠️ COPIER-COLLER le middleware existant sans modification
+2. ⚠️ GARDER tous les print() existants avec flush=True
+3. ⚠️ GARDER le filtre health checks dans le middleware (ne pas logger /, /health)
+4. ⚠️ GARDER la logique throttle identique (dictionnaire last_write_time)
+5. ⚠️ GARDER l'arrondi timestamp .replace(second=0, microsecond=0) dans database.py
+6. ⚠️ GARDER les paramètres pool (min=1, max=3)
+7. ⚠️ GARDER les commandes RPC bootstrap (NotifyStatus enable + Shelly.GetStatus)
+8. ⚠️ NE PAS modifier la structure de la table power_logs
+9. ⚠️ NE PAS ajouter de dépendances (tout utilise asyncpg, fastapi, pydantic déjà présents)
+
+TESTS DE VALIDATION POST-REFACTO
+=================================
+Vérifier impérativement que :
+
+1. ✅ Application démarre sans erreur
+   - Vérifier : "🚀 Starting Shelly Collector..." puis "✅ Database pool created successfully"
+
+2. ✅ Route health check fonctionne
+   - Tester : curl http://localhost:8000/
+   - Attendu : "Shelly WebSocket Collector is running"
+
+3. ✅ WebSocket accepte connexions
+   - Vérifier logs : "✅ WebSocket connection accepted"
+
+4. ✅ Commandes RPC bootstrap envoyées
+   - Vérifier logs : "📤 Sent: NotifyStatus enable" puis "📤 Sent: Shelly.GetStatus"
+
+5. ✅ Insertion DB fonctionne
+   - Envoyer message test Shelly via WebSocket
+   - Vérifier logs : "✅ Logged: shellypro4pm-xxx switch:X XXXW"
+   - Vérifier en DB : SELECT COUNT(*) FROM power_logs doit augmenter
+
+6. ✅ Throttling fonctionne
+   - Envoyer 2 messages identiques rapidement
+   - Vérifier logs : "⏭️ Throttled: ..." sur le 2ème message
+
+7. ✅ Middleware logs fonctionne
+   - Vérifier logs HTTP avec IP, user-agent, cold start detection
+
+8. ✅ Pas de régression performance
+   - Temps réponse health check < 100ms
+   - Latence WebSocket identique
+
+9. ✅ Shelly device envoie bien des données
+   - Si un Shelly est connecté, vérifier que les mesures arrivent toujours
+   - Si pas de données après 2-3 minutes → problème avec les commandes bootstrap
+
+LIVRABLES
+=========
+- 4 nouveaux fichiers : config.py, services/database.py, models/schemas.py, __init__.py (x2)
+- main.py refactorisé (~90-100 lignes)
+- Application 100% fonctionnelle à l'identique
+- Commandes RPC bootstrap préservées
+- Logs et comportement inchangés
+- Base propre pour ajouter le dashboard (Temps 2)
