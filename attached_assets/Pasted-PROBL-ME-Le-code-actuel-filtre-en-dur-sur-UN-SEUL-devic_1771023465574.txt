@@ -1,0 +1,197 @@
+PROBLÈME
+========
+Le code actuel filtre en dur sur UN SEUL device_id (config.SHELLY_DEVICE_ID).
+Si plusieurs Shelly Pro 4PM sont connectés, seul le premier sera affiché.
+
+OBJECTIF
+========
+Rendre le dashboard compatible avec plusieurs devices :
+1. API : Rendre le filtre device_id optionnel (afficher tous les devices par défaut)
+2. Dashboard : Ajouter un dropdown "Device" pour filtrer par device_id
+3. Garder la colonne Device ID dans le tableau pour identifier chaque ligne
+
+SPÉCIFICATIONS
+===============
+
+MODIFICATION 1 : API - Rendre device_id optionnel
+--------------------------------------------------
+Modifier api/routes.py dans la fonction get_pump_cycles() :
+
+Remplacer la section de requête SQL (lignes ~45-60) par :
+
+# Requête DB
+query = """
+    SELECT timestamp, channel, apower_w, device_id
+    FROM power_logs
+    WHERE timestamp >= $1 AND timestamp <= $2
+"""
+params = [start_dt, end_dt]
+
+# Filtre device_id optionnel
+device_id_param = request.query_params.get('device_id')
+if device_id_param:
+    query += " AND device_id = $" + str(len(params) + 1)
+    params.append(device_id_param)
+
+# Filtre channel optionnel
+if channel:
+    query += " AND channel = $" + str(len(params) + 1)
+    params.append(channel)
+
+query += " ORDER BY device_id, channel, timestamp ASC"
+
+async with db_pool.acquire() as conn:
+    records = await conn.fetch(query, *params)
+
+print(f"📊 API: Fetched {len(records)} records for cycle detection", flush=True)
+
+# Convertir en liste de tuples (AJOUTER device_id)
+records_list = [(r['timestamp'], r['channel'], r['apower_w']) for r in records]
+
+Note : On récupère device_id depuis la DB mais on ne le passe pas encore à detect_cycles (pour l'instant).
+
+
+MODIFICATION 2 : Dashboard - Ajouter filtre Device
+---------------------------------------------------
+Modifier web/dashboard.py dans le HTML :
+
+1. Ajouter un nouveau filtre dans la section filtres (ligne ~90) :
+
+<div class="filter-group">
+    <label for="device-filter">🔌 Device</label>
+    <select id="device-filter">
+        <option value="">Tous les devices</option>
+    </select>
+</div>
+
+2. Dans le JavaScript, ajouter une fonction pour charger les devices (après loadCycles) :
+
+async function loadDevices() {
+    try {
+        // Récupérer tous les cycles pour extraire les device_id uniques
+        const response = await fetch('/api/pump-cycles?limit=10000');
+        if (!response.ok) return;
+        const data = await response.json();
+        
+        // Extraire les device_id uniques
+        const deviceIds = [...new Set(data.cycles.map(c => currentData.device_id))];
+        
+        // Si on a plusieurs devices, les ajouter au dropdown
+        if (deviceIds.length > 1 || (deviceIds.length === 1 && deviceIds[0] !== 'shellypro4pm-a0dd6c9ef474')) {
+            const select = document.getElementById('device-filter');
+            deviceIds.forEach(deviceId => {
+                const option = document.createElement('option');
+                option.value = deviceId;
+                option.textContent = deviceId;
+                select.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.error('Error loading devices:', e);
+    }
+}
+
+3. Modifier la fonction loadCycles() pour inclure le filtre device (ligne ~240) :
+
+async function loadCycles() {
+    const channel = document.getElementById('channel-filter').value;
+    const deviceId = document.getElementById('device-filter').value;  // ← NOUVEAU
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    
+    // Afficher loading
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('table-wrapper').style.display = 'none';
+    document.getElementById('empty').style.display = 'none';
+    
+    try {
+        // Construire URL
+        let url = '/api/pump-cycles?';
+        if (deviceId) url += `device_id=${deviceId}&`;  // ← NOUVEAU
+        if (channel) url += `channel=${channel}&`;
+        if (startDate) url += `start_date=${startDate}T00:00:00Z&`;
+        if (endDate) url += `end_date=${endDate}T23:59:59Z&`;
+        
+        // ... reste du code identique
+    }
+}
+
+4. Appeler loadDevices() au chargement (ligne ~235, dans DOMContentLoaded) :
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Définir dates par défaut (45 derniers jours)
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 45);
+    
+    document.getElementById('start-date').valueAsDate = startDate;
+    document.getElementById('end-date').valueAsDate = today;
+    
+    // Charger données
+    loadCycles();
+    loadDevices();  // ← NOUVEAU
+});
+
+
+MODIFICATION 3 : Mettre à jour le retour JSON de l'API
+-------------------------------------------------------
+Dans api/routes.py, modifier le return pour ne pas forcer un seul device_id :
+
+return {
+    "total": len(cycles),
+    "device_ids": list(set([r['device_id'] for r in records])),  # Liste des devices trouvés
+    "filters": {
+        "device_id": device_id_param,
+        "channel": channel,
+        "start_date": start_dt.isoformat() + 'Z',
+        "end_date": end_dt.isoformat() + 'Z'
+    },
+    "cycles": cycles
+}
+
+Note : Chaque cycle garde son device_id dans le tableau, donc on peut les distinguer visuellement.
+
+
+MODIFICATION 4 : Adapter cycle_detector.py (optionnel)
+-------------------------------------------------------
+Pour l'instant, cycle_detector.py groupe par channel uniquement.
+Si tu veux grouper par (device_id, channel), modifier la fonction detect_cycles() :
+
+# Grouper par (device_id, channel)
+for timestamp, channel, apower in records:
+    # Extraire device_id depuis les records (il faudrait modifier la signature)
+    # Pour l'instant, on garde comme ça et on distingue dans le tableau
+
+Note : Pas urgent, le device_id est déjà affiché dans le tableau donc visuellement on peut les distinguer.
+
+
+TESTS DE VALIDATION
+===================
+1. ✅ Avec 1 seul device :
+   - Dropdown "Device" affiche "Tous les devices" (pas d'options supplémentaires)
+   - Tableau affiche le device_id unique
+   
+2. ✅ Avec 2+ devices :
+   - Dropdown "Device" affiche "Tous les devices" + liste des device_id
+   - Sélectionner "Tous" → affiche tous les cycles mélangés
+   - Sélectionner un device_id → affiche uniquement ses cycles
+   
+3. ✅ Colonne Device ID :
+   - Permet de distinguer visuellement les devices dans le tableau
+   
+4. ✅ API :
+   - GET /api/pump-cycles → retourne tous les devices
+   - GET /api/pump-cycles?device_id=xxx → filtre sur le device
+
+RÉSULTAT ATTENDU
+================
+Dashboard multi-device avec :
+- Filtre "Device" : Tous / shellypro4pm-xxx / shellypro4pm-yyy
+- Tableau avec device_id visible
+- Possibilité de voir tous les devices ensemble ou filtrer
+- Code évolutif pour 3, 4, 5+ devices
+
+CONFIGURATION
+=============
+Le SHELLY_DEVICE_ID dans config.py peut rester, mais n'est plus utilisé comme filtre obligatoire.
+Il peut servir de référence ou pour d'autres usages futurs.

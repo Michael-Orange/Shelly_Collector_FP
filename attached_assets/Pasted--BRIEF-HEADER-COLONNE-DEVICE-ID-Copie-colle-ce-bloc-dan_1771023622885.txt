@@ -1,0 +1,152 @@
+📋 BRIEF : HEADER + COLONNE DEVICE ID
+Copie-colle ce bloc dans Replit Agent :
+OBJECTIF
+========
+Faire 2 modifications visuelles sur le dashboard :
+1. Supprimer "• Shelly Pro 4PM" du header
+2. Ajouter une colonne "Device ID" avant "Canal" dans le tableau
+
+SPÉCIFICATIONS
+===============
+
+MODIFICATION 1 : Supprimer "• Shelly Pro 4PM" du header
+--------------------------------------------------------
+Fichier : web/dashboard.py
+Ligne : ~60 dans la section HTML du header
+
+Remplacer :
+<div class="header">
+    <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
+    <p>Suivi en temps réel des cycles de démarrage et d'arrêt • Shelly Pro 4PM</p>
+</div>
+
+Par :
+<div class="header">
+    <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
+    <p>Suivi en temps réel des cycles de démarrage et d'arrêt</p>
+</div>
+
+
+MODIFICATION 2 : Ajouter colonne "Device ID" dans le tableau
+-------------------------------------------------------------
+Fichier : web/dashboard.py
+
+Étape 2.1 : Modifier le <thead> (ligne ~240)
+Remplacer :
+<thead>
+    <tr>
+        <th>Canal</th>
+        <th>Date</th>
+        <th>Démarrage</th>
+        <th>Arrêt</th>
+        <th>Durée</th>
+        <th>Puissance moy.</th>
+    </tr>
+</thead>
+
+Par :
+<thead>
+    <tr>
+        <th>Device ID</th>
+        <th>Canal</th>
+        <th>Date</th>
+        <th>Démarrage</th>
+        <th>Arrêt</th>
+        <th>Durée</th>
+        <th>Puissance moy.</th>
+    </tr>
+</thead>
+
+Étape 2.2 : Modifier la fonction renderTable() dans le JavaScript (ligne ~280)
+Dans le forEach qui génère les lignes, ajouter la cellule Device ID AVANT la cellule Canal.
+
+Chercher cette section :
+cycles.forEach(cycle => {
+    const row = document.createElement('tr');
+    
+    // Canal
+    const channelClass = 'channel-' + cycle.channel.replace(':', '-');
+    const channelCell = `<td><span class="channel-badge ${channelClass}">${cycle.channel}</span></td>`;
+
+Ajouter AVANT la section Canal :
+cycles.forEach(cycle => {
+    const row = document.createElement('tr');
+    
+    // Device ID (nouvelle colonne)
+    const deviceId = currentData && currentData.device_id ? currentData.device_id : 'N/A';
+    const deviceCell = `<td style="font-size: 0.85rem; color: #7f8c8d;">${deviceId}</td>`;
+    
+    // Canal
+    const channelClass = 'channel-' + cycle.channel.replace(':', '-');
+    const channelCell = `<td><span class="channel-badge ${channelClass}">${cycle.channel}</span></td>`;
+
+Puis, dans le row.innerHTML à la fin de la boucle, ajouter ${deviceCell} en premier :
+
+Chercher :
+row.innerHTML = `
+    ${channelCell}
+    <td>${dateStr}</td>
+    <td>${startTimeStr}</td>
+    <td>${endTimeStr}</td>
+    <td>${durationStr}</td>
+    <td>${powerStr}</td>
+`;
+
+Remplacer par :
+row.innerHTML = `
+    ${deviceCell}
+    ${channelCell}
+    <td>${dateStr}</td>
+    <td>${startTimeStr}</td>
+    <td>${endTimeStr}</td>
+    <td>${durationStr}</td>
+    <td>${powerStr}</td>
+`;
+
+Étape 2.3 : Modifier la fonction exportCSV() dans le JavaScript (ligne ~420)
+Ajouter la colonne Device ID dans l'export CSV.
+
+Chercher :
+let csv = 'Canal;Date;Heure démarrage;Heure arrêt;Durée (min);Puissance moyenne (W);Statut\n';
+
+Remplacer par :
+const deviceId = currentData.device_id || 'N/A';
+let csv = 'Device ID;Canal;Date;Heure démarrage;Heure arrêt;Durée (min);Puissance moyenne (W);Statut\n';
+
+Puis dans la boucle forEach, chercher :
+csv += `${cycle.channel};${dateStr};...
+
+Remplacer par :
+csv += `${deviceId};${cycle.channel};${dateStr};...
+
+
+TESTS DE VALIDATION
+===================
+1. ✅ Header : Le texte "• Shelly Pro 4PM" n'apparaît plus
+   Attendu : "Suivi en temps réel des cycles de démarrage et d'arrêt" uniquement
+
+2. ✅ Tableau : 7 colonnes visibles dans cet ordre :
+   - Device ID (gris clair, petit)
+   - Canal (badge coloré)
+   - Date
+   - Démarrage
+   - Arrêt
+   - Durée
+   - Puissance moy.
+
+3. ✅ Première colonne Device ID affiche : "shellypro4pm-a0dd6c9ef474"
+
+4. ✅ Export CSV : Header contient "Device ID" en première colonne
+
+5. ✅ Export CSV : Chaque ligne commence par le device_id
+
+RÉSULTAT VISUEL ATTENDU
+========================
+DEVICE ID                    CANAL      DATE       DEMARRAGE  ARRET    DUREE   PUISSANCE MOY.
+shellypro4pm-a0dd6c9ef474   switch:2   27/11/2025  14h30      14h58    28 min  461.5 W
+shellypro4pm-a0dd6c9ef474   switch:2   27/11/2025  10h02      10h34    32 min  439.2 W
+...
+✅ CE QUI EST FAIT
+Ce brief fait UNIQUEMENT :
+✅ Suppression "• Shelly Pro 4PM" du header
+✅ Ajout colonne "Device ID" avant "Canal"
