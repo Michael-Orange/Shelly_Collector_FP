@@ -303,7 +303,7 @@ def render_dashboard() -> str:
             <div class="filters-grid">
                 <div class="filter-group">
                     <label for="device-filter">Device</label>
-                    <select id="device-filter">
+                    <select id="device-filter" onchange="loadChannelOptions()">
                         <option value="">Tous les devices</option>
                     </select>
                 </div>
@@ -312,9 +312,6 @@ def render_dashboard() -> str:
                     <label for="channel-filter">Canal</label>
                     <select id="channel-filter">
                         <option value="">Tous les canaux</option>
-                        <option value="switch:0">Canal 0</option>
-                        <option value="switch:1">Canal 1</option>
-                        <option value="switch:2">Canal 2</option>
                     </select>
                 </div>
 
@@ -412,24 +409,57 @@ def render_dashboard() -> str:
             return channel;
         }
 
+        let allDevicesData = [];
+
         async function loadDevices() {
             try {
                 const response = await fetch('/api/config/devices');
                 if (!response.ok) return;
                 const data = await response.json();
 
-                if (data.devices && data.devices.length > 0) {
+                allDevicesData = data.devices || [];
+
+                if (allDevicesData.length > 0) {
                     const select = document.getElementById('device-filter');
-                    data.devices.forEach(device => {
+                    allDevicesData.forEach(device => {
                         const option = document.createElement('option');
                         option.value = device.device_id;
                         option.textContent = device.device_name || device.device_id;
                         select.appendChild(option);
                     });
                 }
+
+                loadChannelOptions();
             } catch (e) {
                 console.error('Error loading devices:', e);
             }
+        }
+
+        function loadChannelOptions() {
+            const select = document.getElementById('channel-filter');
+            const selectedDeviceId = document.getElementById('device-filter').value;
+
+            select.innerHTML = '<option value="">Tous les canaux</option>';
+
+            if (allDevicesData.length === 0) return;
+
+            const devices = selectedDeviceId
+                ? allDevicesData.filter(d => d.device_id === selectedDeviceId)
+                : allDevicesData;
+
+            devices.forEach(device => {
+                const channelNames = device.channel_names || {};
+
+                device.channels.forEach(channel => {
+                    const option = document.createElement('option');
+                    option.value = channel;
+                    const displayName = channelNames[channel] || channel;
+                    option.textContent = (devices.length > 1 && !selectedDeviceId)
+                        ? '[' + (device.device_name || device.device_id) + '] ' + displayName
+                        : displayName;
+                    select.appendChild(option);
+                });
+            });
         }
 
         async function loadCycles() {
