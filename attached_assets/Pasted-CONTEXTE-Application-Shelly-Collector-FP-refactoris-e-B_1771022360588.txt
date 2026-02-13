@@ -1,0 +1,959 @@
+CONTEXTE
+========
+Application Shelly_Collector_FP refactorisée (Brief 1 complété avec succès).
+Architecture modulaire : main.py + config.py + services/database.py + models/schemas.py.
+Base de données : power_logs avec 15k+ enregistrements de pompes Shelly Pro 4PM.
+Device unique : shellypro4pm-a0dd6c9ef474 avec 3 canaux (switch:0, switch:1, switch:2).
+
+Objectif : Ajouter une interface web pour visualiser les cycles de marche/arrêt des pompes.
+Design : Style FiltrePlante.com (vert nature #2d8659, minimaliste, moderne).
+
+PROBLÉMATIQUE
+=============
+Les pompes démarrent et s'arrêtent, mais quand elles s'arrêtent, aucun enregistrement à 0W (filtré par Cloudflare Worker à >10W).
+→ Détection d'arrêt par "gap" dans les timestamps : si écart ≥3 minutes entre 2 mesures = pompe arrêtée.
+→ Ignorer les cycles < 2 minutes (bruit, faux démarrages).
+→ Afficher les 45 derniers jours par défaut.
+
+OBJECTIF
+========
+Ajouter 3 nouveaux composants à l'application :
+
+1. services/cycle_detector.py : Logique de détection des cycles
+2. api/routes.py : Endpoint GET /api/pump-cycles (retourne JSON)
+3. web/dashboard.py : Page GET /dashboard (HTML complet avec charte FiltrePlante)
+
+Fonctionnalités :
+- Afficher cycles avec date/heure démarrage, arrêt, durée, puissance moyenne
+- Filtrer par canal, par période (dates personnalisables)
+- Exporter en CSV (format français : point-virgule)
+- Cycles en cours affichés avec mention "En cours ⚡"
+- Interface responsive, style vert FiltrePlante
+- Timezone : Affichage heure locale Sénégal (UTC+0, donc pas de conversion nécessaire)
+
+SPÉCIFICATIONS
+===============
+
+PARTIE 1 : LOGIQUE DE DÉTECTION DES CYCLES
+-------------------------------------------
+
+Créer services/cycle_detector.py :
+
+"""
+Module: cycle_detector
+Description: Détection des cycles de marche/arrêt des pompes
+Created: 2026-02-13
+Part of Shelly_Collector_FP
+"""
+
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+
+def detect_cycles(
+    records: List[tuple],
+    gap_threshold_minutes: int = 3,
+    min_duration_minutes: int = 2
+) -> List[Dict]:
+    """
+    Détecte les cycles de marche/arrêt à partir des enregistrements.
+    
+    Args:
+        records: Liste de tuples (timestamp, channel, apower_w)
+                 Channel format attendu : "switch:0", "switch:1", "switch:2"
+        gap_threshold_minutes: Écart en minutes pour détecter un arrêt (défaut: 3)
+        min_duration_minutes: Durée minimale d'un cycle valide (défaut: 2)
+        
+    Returns:
+        Liste de dictionnaires avec les cycles détectés, triée par date décroissante
+        
+    Format retour :
+    {
+        "channel": "switch:1",
+        "start_time": datetime,
+        "end_time": datetime ou None (si en cours),
+        "duration_minutes": float,
+        "avg_power_w": float,
+        "records_count": int,
+        "is_ongoing": bool
+    }
+    """
+    if not records:
+        return []
+    
+    cycles = []
+    grouped_by_channel = {}
+    
+    # Grouper par canal
+    for timestamp, channel, apower in records:
+        if channel not in grouped_by_channel:
+            grouped_by_channel[channel] = []
+        grouped_by_channel[channel].append((timestamp, apower))
+    
+    # Analyser chaque canal
+    for channel, channel_records in grouped_by_channel.items():
+        if not channel_records:
+            continue
+        
+        # Trier par timestamp
+        channel_records.sort(key=lambda x: x[0])
+        
+        cycle_start = channel_records[0][0]
+        cycle_powers = [channel_records[0][1]]
+        
+        for i in range(1, len(channel_records)):
+            current_time = channel_records[i][0]
+            current_power = channel_records[i][1]
+            previous_time = channel_records[i-1][0]
+            
+            gap_minutes = (current_time - previous_time).total_seconds() / 60
+            
+            # Gap détecté = fin de cycle
+            if gap_minutes >= gap_threshold_minutes:
+                cycle_end = previous_time
+                cycle_duration = (cycle_end - cycle_start).total_seconds() / 60
+                
+                # Valider durée minimale
+                if cycle_duration >= min_duration_minutes:
+                    avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
+                    
+                    cycles.append({
+                        "channel": channel,
+                        "start_time": cycle_start,
+                        "end_time": cycle_end,
+                        "duration_minutes": round(cycle_duration, 1),
+                        "avg_power_w": round(avg_power, 1),
+                        "records_count": len(cycle_powers),
+                        "is_ongoing": False
+                    })
+                
+                # Nouveau cycle commence
+                cycle_start = current_time
+                cycle_powers = [current_power]
+            else:
+                cycle_powers.append(current_power)
+        
+        # Dernier cycle (potentiellement en cours)
+        if cycle_powers:
+            cycle_end = channel_records[-1][0]
+            cycle_duration = (cycle_end - cycle_start).total_seconds() / 60
+            
+            # Vérifier si en cours (dernière mesure < gap_threshold)
+            time_since_last = (datetime.utcnow() - cycle_end).total_seconds() / 60
+            is_ongoing = time_since_last < gap_threshold_minutes
+            
+            if cycle_duration >= min_duration_minutes or is_ongoing:
+                avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
+                
+                cycles.append({
+                    "channel": channel,
+                    "start_time": cycle_start,
+                    "end_time": cycle_end if not is_ongoing else None,
+                    "duration_minutes": round(cycle_duration, 1),
+                    "avg_power_w": round(avg_power, 1),
+                    "records_count": len(cycle_powers),
+                    "is_ongoing": is_ongoing
+                })
+    
+    # Trier par date décroissante
+    cycles.sort(key=lambda x: x["start_time"], reverse=True)
+    
+    return cycles
+
+
+PARTIE 2 : ENDPOINT API
+------------------------
+
+Créer le dossier api/ avec __init__.py vide.
+Créer api/routes.py :
+
+"""
+Module: routes
+Description: API endpoints pour le dashboard
+Created: 2026-02-13
+Part of Shelly_Collector_FP
+"""
+
+from fastapi import APIRouter, Query, HTTPException
+from datetime import datetime, timedelta
+from typing import Optional
+import config
+from services.cycle_detector import detect_cycles
+
+router = APIRouter(prefix="/api")
+
+@router.get("/pump-cycles")
+async def get_pump_cycles(
+    channel: Optional[str] = Query(None, description="Filtrer par canal (ex: switch:1)"),
+    start_date: Optional[str] = Query(None, description="Date début ISO (ex: 2026-02-01)"),
+    end_date: Optional[str] = Query(None, description="Date fin ISO (ex: 2026-02-14)"),
+    limit: int = Query(1000, ge=1, le=10000, description="Nombre max de cycles")
+):
+    """
+    Retourne les cycles de marche/arrêt des pompes détectés.
+    
+    Logique : Gap ≥3 minutes entre mesures = cycle terminé.
+    Filtre : Cycles de durée minimale 2 minutes.
+    Défaut : 45 derniers jours.
+    """
+    # Import db_pool depuis main (sera disponible via import)
+    from main import db_pool
+    
+    try:
+        # Dates par défaut : 45 derniers jours
+        if not start_date:
+            start_dt = datetime.utcnow() - timedelta(days=config.DEFAULT_DAYS_HISTORY)
+        else:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        
+        if not end_date:
+            end_dt = datetime.utcnow()
+        else:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        
+        # Requête DB
+        query = """
+            SELECT timestamp, channel, apower_w
+            FROM power_logs
+            WHERE timestamp >= $1 AND timestamp <= $2
+            AND device_id = 'shellypro4pm-a0dd6c9ef474'
+        """
+        params = [start_dt, end_dt]
+        
+        if channel:
+            query += " AND channel = $3"
+            params.append(channel)
+        
+        query += " ORDER BY channel, timestamp ASC"
+        
+        async with db_pool.acquire() as conn:
+            records = await conn.fetch(query, *params)
+        
+        print(f"📊 API: Fetched {len(records)} records for cycle detection", flush=True)
+        
+        # Convertir en liste de tuples
+        records_list = [(r['timestamp'], r['channel'], r['apower_w']) for r in records]
+        
+        # Détecter cycles
+        cycles = detect_cycles(
+            records_list,
+            gap_threshold_minutes=config.GAP_THRESHOLD_MINUTES,
+            min_duration_minutes=config.MIN_CYCLE_DURATION_MINUTES
+        )
+        
+        print(f"🔍 API: Detected {len(cycles)} cycles", flush=True)
+        
+        # Limiter résultats
+        cycles = cycles[:limit]
+        
+        # Formater pour JSON
+        for cycle in cycles:
+            cycle['start_time'] = cycle['start_time'].isoformat() + 'Z'
+            if cycle['end_time']:
+                cycle['end_time'] = cycle['end_time'].isoformat() + 'Z'
+            else:
+                cycle['end_time'] = None  # En cours
+        
+        return {
+            "total": len(cycles),
+            "device_id": "shellypro4pm-a0dd6c9ef474",
+            "filters": {
+                "channel": channel,
+                "start_date": start_dt.isoformat() + 'Z',
+                "end_date": end_dt.isoformat() + 'Z'
+            },
+            "cycles": cycles
+        }
+    
+    except Exception as e:
+        print(f"❌ Error in /api/pump-cycles: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+
+
+PARTIE 3 : PAGE HTML DASHBOARD
+-------------------------------
+
+Créer le dossier web/ avec __init__.py vide.
+Créer web/dashboard.py :
+
+"""
+Module: dashboard
+Description: Interface web pour visualiser les cycles de pompes
+Created: 2026-02-13
+Part of Shelly_Collector_FP
+Style: Charte graphique FiltrePlante.com (vert #2d8659)
+"""
+
+def render_dashboard() -> str:
+    """Retourne le HTML complet du dashboard avec style FiltrePlante."""
+    
+    return """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FiltrePlante - Monitoring Pompes</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f8f9fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        
+        /* Header style FiltrePlante */
+        .header {
+            background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        /* Filtres */
+        .filters {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+        
+        .filters-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .filter-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: #1a5738;
+        }
+        
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 0.6rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.3s;
+        }
+        
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #2d8659;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 0.7rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #2d8659;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #1a5738;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(45, 134, 89, 0.3);
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: #2d8659;
+            border: 2px solid #2d8659;
+        }
+        
+        .btn-secondary:hover {
+            background: #f0f8f4;
+        }
+        
+        /* Statistiques */
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            border-left: 4px solid #2d8659;
+        }
+        
+        .stat-card .label {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2d8659;
+            margin-top: 0.5rem;
+        }
+        
+        /* Tableau */
+        .table-container {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            background: #1a5738;
+            color: white;
+        }
+        
+        th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        tbody tr {
+            border-bottom: 1px solid #ecf0f1;
+            transition: background 0.2s;
+        }
+        
+        tbody tr:hover {
+            background: #f0f8f4;
+        }
+        
+        tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+        
+        tbody tr:nth-child(even):hover {
+            background: #f0f8f4;
+        }
+        
+        td {
+            padding: 1rem;
+            font-size: 0.95rem;
+        }
+        
+        .channel-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        
+        .channel-switch-0 { background: #e3f2fd; color: #1976d2; }
+        .channel-switch-1 { background: #f3e5f5; color: #7b1fa2; }
+        .channel-switch-2 { background: #fff3e0; color: #f57c00; }
+        
+        .ongoing {
+            color: #2d8659;
+            font-weight: 600;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            border: 3px solid #ecf0f1;
+            border-top: 3px solid #2d8659;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .empty {
+            text-align: center;
+            padding: 3rem;
+            color: #7f8c8d;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .header {
+                padding: 1.5rem;
+            }
+            
+            .header h1 {
+                font-size: 1.3rem;
+            }
+            
+            .filters-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .buttons {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+            }
+            
+            table {
+                font-size: 0.85rem;
+            }
+            
+            th, td {
+                padding: 0.7rem 0.5rem;
+            }
+            
+            .stat-card .value {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
+        <p>Suivi en temps réel des cycles de démarrage et d'arrêt • Shelly Pro 4PM</p>
+    </div>
+    
+    <div class="container">
+        <!-- Filtres -->
+        <div class="filters">
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="channel-filter">💧 Canal</label>
+                    <select id="channel-filter">
+                        <option value="">Tous les canaux</option>
+                        <option value="switch:0">Canal 0</option>
+                        <option value="switch:1">Canal 1</option>
+                        <option value="switch:2">Canal 2</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label for="start-date">📅 Date début</label>
+                    <input type="date" id="start-date">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="end-date">📅 Date fin</label>
+                    <input type="date" id="end-date">
+                </div>
+            </div>
+            
+            <div class="buttons">
+                <button class="btn-primary" onclick="loadCycles()">🔄 Rafraîchir</button>
+                <button class="btn-secondary" onclick="exportCSV()">📥 Exporter CSV</button>
+            </div>
+        </div>
+        
+        <!-- Statistiques -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Total cycles</div>
+                <div class="value" id="stat-total">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">En cours</div>
+                <div class="value" id="stat-ongoing">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Durée moyenne</div>
+                <div class="value" id="stat-avg-duration">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Puissance moy.</div>
+                <div class="value" id="stat-avg-power">-</div>
+            </div>
+        </div>
+        
+        <!-- Tableau -->
+        <div class="table-container">
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Chargement des données...</p>
+            </div>
+            
+            <div id="table-wrapper" style="display: none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Canal</th>
+                            <th>Date</th>
+                            <th>Démarrage</th>
+                            <th>Arrêt</th>
+                            <th>Durée</th>
+                            <th>Puissance moy.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cycles-tbody">
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="empty" class="empty" style="display: none;">
+                <p>📭 Aucun cycle trouvé pour cette période</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentData = null;
+        
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            // Définir dates par défaut (45 derniers jours)
+            const today = new Date();
+            const startDate = new Date(today);
+            startDate.setDate(today.getDate() - 45);
+            
+            document.getElementById('start-date').valueAsDate = startDate;
+            document.getElementById('end-date').valueAsDate = today;
+            
+            // Charger données
+            loadCycles();
+        });
+        
+        async function loadCycles() {
+            const channel = document.getElementById('channel-filter').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            
+            // Afficher loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('table-wrapper').style.display = 'none';
+            document.getElementById('empty').style.display = 'none';
+            
+            try {
+                // Construire URL
+                let url = '/api/pump-cycles?';
+                if (channel) url += `channel=${channel}&`;
+                if (startDate) url += `start_date=${startDate}T00:00:00Z&`;
+                if (endDate) url += `end_date=${endDate}T23:59:59Z&`;
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                
+                currentData = data;
+                
+                // Cacher loading
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.cycles.length === 0) {
+                    document.getElementById('empty').style.display = 'block';
+                    updateStats([]);
+                    return;
+                }
+                
+                // Afficher tableau
+                document.getElementById('table-wrapper').style.display = 'block';
+                renderTable(data.cycles);
+                updateStats(data.cycles);
+                
+            } catch (error) {
+                console.error('Erreur:', error);
+                document.getElementById('loading').style.display = 'none';
+                alert('Erreur lors du chargement des données: ' + error.message);
+            }
+        }
+        
+        function renderTable(cycles) {
+            const tbody = document.getElementById('cycles-tbody');
+            tbody.innerHTML = '';
+            
+            cycles.forEach(cycle => {
+                const row = document.createElement('tr');
+                
+                // Canal
+                const channelClass = 'channel-' + cycle.channel.replace(':', '-');
+                const channelCell = `<td><span class="channel-badge ${channelClass}">${cycle.channel}</span></td>`;
+                
+                // Date (UTC+0 pour Sénégal, pas de conversion nécessaire)
+                const startDate = new Date(cycle.start_time);
+                const dateStr = startDate.toLocaleDateString('fr-SN', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric' 
+                });
+                
+                // Heure démarrage
+                const startTimeStr = startDate.toLocaleTimeString('fr-SN', { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                
+                // Heure arrêt
+                let endTimeStr;
+                if (cycle.is_ongoing) {
+                    endTimeStr = '<span class="ongoing">En cours ⚡</span>';
+                } else {
+                    const endDate = new Date(cycle.end_time);
+                    endTimeStr = endDate.toLocaleTimeString('fr-SN', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                    });
+                }
+                
+                // Durée
+                const durationStr = `${cycle.duration_minutes} min`;
+                
+                // Puissance
+                const powerStr = `${cycle.avg_power_w} W`;
+                
+                row.innerHTML = `
+                    ${channelCell}
+                    <td>${dateStr}</td>
+                    <td>${startTimeStr}</td>
+                    <td>${endTimeStr}</td>
+                    <td>${durationStr}</td>
+                    <td>${powerStr}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+        
+        function updateStats(cycles) {
+            const total = cycles.length;
+            const ongoing = cycles.filter(c => c.is_ongoing).length;
+            
+            let totalDuration = 0;
+            let totalPower = 0;
+            cycles.forEach(c => {
+                totalDuration += c.duration_minutes;
+                totalPower += c.avg_power_w;
+            });
+            
+            const avgDuration = total > 0 ? Math.round(totalDuration / total) : 0;
+            const avgPower = total > 0 ? Math.round(totalPower / total) : 0;
+            
+            document.getElementById('stat-total').textContent = total;
+            document.getElementById('stat-ongoing').textContent = ongoing;
+            document.getElementById('stat-avg-duration').textContent = `${avgDuration} min`;
+            document.getElementById('stat-avg-power').textContent = `${avgPower} W`;
+        }
+        
+        function exportCSV() {
+            if (!currentData || currentData.cycles.length === 0) {
+                alert('Aucune donnée à exporter');
+                return;
+            }
+            
+            // Construire CSV (format français : point-virgule)
+            let csv = 'Canal;Date;Heure démarrage;Heure arrêt;Durée (min);Puissance moyenne (W);Statut\n';
+            
+            currentData.cycles.forEach(cycle => {
+                const startDate = new Date(cycle.start_time);
+                const dateStr = startDate.toLocaleDateString('fr-SN');
+                const startTimeStr = startDate.toLocaleTimeString('fr-SN');
+                
+                let endTimeStr = '';
+                let status = 'Terminé';
+                if (cycle.is_ongoing) {
+                    endTimeStr = '-';
+                    status = 'En cours';
+                } else {
+                    const endDate = new Date(cycle.end_time);
+                    endTimeStr = endDate.toLocaleTimeString('fr-SN');
+                }
+                
+                csv += `${cycle.channel};${dateStr};${startTimeStr};${endTimeStr};${cycle.duration_minutes};${cycle.avg_power_w};${status}\n`;
+            });
+            
+            // Télécharger
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `cycles_pompes_filtreplante_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+    </script>
+</body>
+</html>
+    """
+
+
+PARTIE 4 : INTÉGRATION DANS MAIN.PY
+------------------------------------
+
+Modifier main.py pour ajouter les nouvelles routes.
+
+1. Ajouter en haut du fichier, après les imports existants :
+
+from fastapi.responses import HTMLResponse
+from api.routes import router as api_router
+from web.dashboard import render_dashboard
+
+2. Après la définition de app = FastAPI(), ajouter :
+
+# Inclure routes API
+app.include_router(api_router)
+
+3. Après la route GET /, ajouter :
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Interface web de visualisation des cycles de pompes."""
+    return render_dashboard()
+
+Note : Le db_pool est déjà global dans main.py, donc accessible depuis api/routes.py via import.
+
+
+TESTS DE VALIDATION
+===================
+
+1. ✅ Application démarre sans erreur
+   - Vérifier logs : Pas d'erreur d'import, pas de syntaxe error
+
+2. ✅ API fonctionne
+   - Tester : GET http://localhost:8000/api/pump-cycles
+   - Attendu : JSON avec structure {"total": X, "cycles": [...]}
+   - Vérifier logs : "📊 API: Fetched X records" et "🔍 API: Detected X cycles"
+
+3. ✅ Dashboard accessible
+   - Ouvrir : http://localhost:8000/dashboard
+   - Attendu : Page HTML avec header vert FiltrePlante
+
+4. ✅ Filtres par défaut
+   - Dashboard doit charger automatiquement les 45 derniers jours
+   - Dates pré-remplies dans les inputs
+
+5. ✅ Filtre par canal
+   - Sélectionner "Canal 2" (switch:2)
+   - Cliquer "Rafraîchir"
+   - Attendu : Tableau affiche uniquement switch:2
+
+6. ✅ Filtre par date
+   - Sélectionner date spécifique (ex: 13/02/2026)
+   - Cliquer "Rafraîchir"
+   - Attendu : Cycles du jour uniquement
+
+7. ✅ Export CSV
+   - Cliquer "Exporter CSV"
+   - Attendu : Téléchargement fichier cycles_pompes_filtreplante_YYYY-MM-DD.csv
+   - Ouvrir fichier : colonnes séparées par point-virgule (;)
+
+8. ✅ Cycles en cours
+   - Si une pompe tourne actuellement
+   - Attendu : Ligne avec "En cours ⚡" dans colonne Arrêt
+   - Badge canal avec couleur (bleu/violet/orange selon canal)
+
+9. ✅ Statistiques
+   - Vérifier les 4 cards : Total, En cours, Durée moyenne, Puissance moyenne
+   - Attendu : Chiffres cohérents avec les données du tableau
+
+10. ✅ Responsive
+    - Ouvrir dashboard sur mobile (ou réduire fenêtre < 768px)
+    - Attendu : Mise en page adaptée, tableau scrollable
+
+11. ✅ Style FiltrePlante
+    - Header : dégradé vert #2d8659 → #1a5738
+    - Bouton primaire : vert #2d8659
+    - Hover bouton : effet ombre verte
+    - Badges canaux : couleurs pastel (bleu/violet/orange)
+
+12. ✅ Pas de régression
+    - WebSocket /ws fonctionne toujours
+    - Route / (health check) fonctionne toujours
+    - Logs existants inchangés
+
+LIVRABLES
+=========
+- services/cycle_detector.py créé (~100 lignes)
+- api/routes.py créé (~80 lignes)
+- web/dashboard.py créé (~450 lignes HTML/CSS/JS inline)
+- main.py modifié (+6 lignes pour inclure routes et dashboard)
+- Dashboard accessible sur /dashboard
+- API accessible sur /api/pump-cycles
+- Style FiltrePlante (vert #2d8659, moderne, clean)
+- Export CSV fonctionnel (format français)
+- Détection cycles : gap 3min, durée min 2min, 45 jours par défaut
+- Timezone : UTC+0 (Sénégal, pas de conversion)
+
+POINTS D'ATTENTION
+==================
+1. Le db_pool est importé depuis main.py dans api/routes.py (import circulaire évité car import tardif)
+2. Les channels sont au format "switch:0", "switch:1", "switch:2" (cohérent avec la DB)
+3. Les timestamps sont en UTC (cohérent avec la base de données)
+4. L'export CSV utilise le point-virgule (standard français)
+5. Les badges de canal utilisent des classes CSS avec tiret (switch-0 au lieu de switch:0)
+6. Le dashboard est entièrement self-contained (pas de CDN externe, pas de dépendances)
+✅ CHECKLIST POST-DASHBOARD
+Une fois Replit a terminé, vérifie :
+ App démarre sans erreur
+ API /api/pump-cycles retourne JSON
+ Dashboard /dashboard affiche la page
+ Style vert FiltrePlante appliqué
+ Filtres fonctionnent (canal, dates)
+ Export CSV télécharge fichier
+ Statistiques correctes
+ Responsive sur mobile
+ Pas de régression sur /ws et /
