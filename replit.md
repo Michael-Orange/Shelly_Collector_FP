@@ -4,14 +4,25 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-13 (Latest)**: Dashboard and cycle detection added:
-- **New**: `services/cycle_detector.py` - Detects pump ON/OFF cycles via gap analysis (3min gap = pump stopped)
-- **New**: `api/routes.py` - GET `/api/pump-cycles` endpoint returning cycle data as JSON
-- **New**: `web/dashboard.py` - Full HTML dashboard with FiltrePlante style (#2d8659 green)
-- **New**: `/dashboard` route serving the web interface
-- **Features**: Filter by channel/date, export CSV (French format), stats cards, ongoing cycle detection
-- **Config**: Added `SHELLY_DEVICE_ID` to centralize device ID
-- **Architecture**: `db_pool` stored in `app.state` to avoid circular imports
+**2026-02-13 (Latest)**: Multi-device support + date fix:
+- **Fix**: ISO date format bug (`+00:00Z` → `Z` only) — "Invalid Date" in JavaScript resolved
+- **Multi-device**: API `device_id` filter now optional (all devices by default)
+- **Multi-device**: Cycle detector groups by `(device_id, channel)` instead of channel only
+- **Multi-device**: Dashboard has "Device" dropdown filter, auto-populated from DB
+- **Multi-device**: API returns `device_ids` list instead of single `device_id`
+- **UI**: Device ID column added to table (before Canal)
+- **UI**: Header cleaned — removed "Shelly Pro 4PM" reference
+- **UI**: Date format DD/MM/YYYY and HHhMM via manual UTC parsing (no toLocaleDateString)
+- **CSV**: Device ID column added, same manual date formatting
+
+**2026-02-13**: Dashboard and cycle detection added:
+- `services/cycle_detector.py` - Detects pump ON/OFF cycles via gap analysis (3min gap = pump stopped)
+- `api/routes.py` - GET `/api/pump-cycles` endpoint returning cycle data as JSON
+- `web/dashboard.py` - Full HTML dashboard with FiltrePlante style (#2d8659 green)
+- `/dashboard` route serving the web interface
+- Filter by channel/date, export CSV (French format), stats cards, ongoing cycle detection
+- `SHELLY_DEVICE_ID` in config.py (used as reference, no longer mandatory filter)
+- `db_pool` stored in `app.state` to avoid circular imports
 
 **2026-02-13**: Modular architecture refactoring:
 - Refactored from single `main.py` into modular structure
@@ -65,7 +76,7 @@ shelly_collector_fp/
 - **Cycle detection**: Gap >= 3 minutes between measurements = pump stopped
 - **Minimum cycle**: Cycles < 2 minutes filtered out (noise)
 - **Default view**: Last 45 days
-- **Filters**: Channel (switch:0/1/2), date range
+- **Filters**: Device ID, Channel (switch:0/1/2), date range
 - **Stats cards**: Total cycles, ongoing, avg duration, avg power
 - **Export CSV**: French format (semicolon separator)
 - **Ongoing cycles**: Marked as "En cours" if last measurement < 3 min ago

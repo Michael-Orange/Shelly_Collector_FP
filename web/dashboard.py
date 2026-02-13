@@ -244,6 +244,15 @@ def render_dashboard() -> str:
             color: #7f8c8d;
         }
 
+        .device-id-cell {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 1rem;
@@ -286,12 +295,19 @@ def render_dashboard() -> str:
 <body>
     <div class="header">
         <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
-        <p>Suivi en temps reel des cycles de demarrage et d'arret | Shelly Pro 4PM</p>
+        <p>Suivi en temps reel des cycles de demarrage et d'arret</p>
     </div>
 
     <div class="container">
         <div class="filters">
             <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="device-filter">Device</label>
+                    <select id="device-filter">
+                        <option value="">Tous les devices</option>
+                    </select>
+                </div>
+
                 <div class="filter-group">
                     <label for="channel-filter">Canal</label>
                     <select id="channel-filter">
@@ -348,6 +364,7 @@ def render_dashboard() -> str:
                 <table>
                     <thead>
                         <tr>
+                            <th>Device ID</th>
                             <th>Canal</th>
                             <th>Date</th>
                             <th>Demarrage</th>
@@ -379,10 +396,32 @@ def render_dashboard() -> str:
             document.getElementById('end-date').valueAsDate = today;
 
             loadCycles();
+            loadDevices();
         });
+
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/pump-cycles?start_date=2020-01-01T00:00:00Z&limit=1');
+                if (!response.ok) return;
+                const data = await response.json();
+
+                if (data.device_ids && data.device_ids.length > 0) {
+                    const select = document.getElementById('device-filter');
+                    data.device_ids.forEach(deviceId => {
+                        const option = document.createElement('option');
+                        option.value = deviceId;
+                        option.textContent = deviceId;
+                        select.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.error('Error loading devices:', e);
+            }
+        }
 
         async function loadCycles() {
             const channel = document.getElementById('channel-filter').value;
+            const deviceId = document.getElementById('device-filter').value;
             const startDate = document.getElementById('start-date').value;
             const endDate = document.getElementById('end-date').value;
 
@@ -392,6 +431,7 @@ def render_dashboard() -> str:
 
             try {
                 let url = '/api/pump-cycles?';
+                if (deviceId) url += `device_id=${deviceId}&`;
                 if (channel) url += `channel=${channel}&`;
                 if (startDate) url += `start_date=${startDate}T00:00:00Z&`;
                 if (endDate) url += `end_date=${endDate}T23:59:59Z&`;
@@ -423,6 +463,31 @@ def render_dashboard() -> str:
             }
         }
 
+        function formatDate(isoStr) {
+            try {
+                const d = new Date(isoStr);
+                if (isNaN(d.getTime())) return 'N/A';
+                const day = String(d.getUTCDate()).padStart(2, '0');
+                const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                const year = d.getUTCFullYear();
+                return day + '/' + month + '/' + year;
+            } catch (e) {
+                return 'N/A';
+            }
+        }
+
+        function formatTime(isoStr) {
+            try {
+                const d = new Date(isoStr);
+                if (isNaN(d.getTime())) return 'N/A';
+                const hours = String(d.getUTCHours()).padStart(2, '0');
+                const minutes = String(d.getUTCMinutes()).padStart(2, '0');
+                return hours + 'h' + minutes;
+            } catch (e) {
+                return 'N/A';
+            }
+        }
+
         function renderTable(cycles) {
             const tbody = document.getElementById('cycles-tbody');
             tbody.innerHTML = '';
@@ -430,46 +495,35 @@ def render_dashboard() -> str:
             cycles.forEach(cycle => {
                 const row = document.createElement('tr');
 
+                const deviceId = cycle.device_id || 'N/A';
+                const deviceCell = '<td class="device-id-cell">' + deviceId + '</td>';
+
                 const channelClass = 'channel-' + cycle.channel.replace(':', '-');
-                const channelCell = `<td><span class="channel-badge ${channelClass}">${cycle.channel}</span></td>`;
+                const channelCell = '<td><span class="channel-badge ' + channelClass + '">' + cycle.channel + '</span></td>';
 
-                const startDate = new Date(cycle.start_time);
-                const dateStr = startDate.toLocaleDateString('fr-FR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    timeZone: 'UTC'
-                });
-
-                const startTimeStr = startDate.toLocaleTimeString('fr-FR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    timeZone: 'UTC'
-                });
+                const dateStr = formatDate(cycle.start_time);
+                const startTimeStr = formatTime(cycle.start_time);
 
                 let endTimeStr;
                 if (cycle.is_ongoing) {
                     endTimeStr = '<span class="ongoing">En cours</span>';
+                } else if (cycle.end_time) {
+                    endTimeStr = formatTime(cycle.end_time);
                 } else {
-                    const endDate = new Date(cycle.end_time);
-                    endTimeStr = endDate.toLocaleTimeString('fr-FR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        timeZone: 'UTC'
-                    });
+                    endTimeStr = '-';
                 }
 
-                const durationStr = `${cycle.duration_minutes} min`;
-                const powerStr = `${cycle.avg_power_w} W`;
+                const durationStr = cycle.duration_minutes + ' min';
+                const powerStr = cycle.avg_power_w + ' W';
 
-                row.innerHTML = `
-                    ${channelCell}
-                    <td>${dateStr}</td>
-                    <td>${startTimeStr}</td>
-                    <td>${endTimeStr}</td>
-                    <td>${durationStr}</td>
-                    <td>${powerStr}</td>
-                `;
+                row.innerHTML =
+                    deviceCell +
+                    channelCell +
+                    '<td>' + dateStr + '</td>' +
+                    '<td>' + startTimeStr + '</td>' +
+                    '<td>' + endTimeStr + '</td>' +
+                    '<td>' + durationStr + '</td>' +
+                    '<td>' + powerStr + '</td>';
 
                 tbody.appendChild(row);
             });
@@ -491,8 +545,8 @@ def render_dashboard() -> str:
 
             document.getElementById('stat-total').textContent = total;
             document.getElementById('stat-ongoing').textContent = ongoing;
-            document.getElementById('stat-avg-duration').textContent = `${avgDuration} min`;
-            document.getElementById('stat-avg-power').textContent = `${avgPower} W`;
+            document.getElementById('stat-avg-duration').textContent = avgDuration + ' min';
+            document.getElementById('stat-avg-power').textContent = avgPower + ' W';
         }
 
         function exportCSV() {
@@ -501,30 +555,31 @@ def render_dashboard() -> str:
                 return;
             }
 
-            let csv = 'Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Statut\\n';
+            let csv = 'Device ID;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Statut\\n';
 
             currentData.cycles.forEach(cycle => {
-                const startDate = new Date(cycle.start_time);
-                const dateStr = startDate.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
-                const startTimeStr = startDate.toLocaleTimeString('fr-FR', { timeZone: 'UTC' });
+                const deviceId = cycle.device_id || 'N/A';
+                const dateStr = formatDate(cycle.start_time);
+                const startTimeStr = formatTime(cycle.start_time);
 
                 let endTimeStr = '';
                 let status = 'Termine';
                 if (cycle.is_ongoing) {
                     endTimeStr = '-';
                     status = 'En cours';
+                } else if (cycle.end_time) {
+                    endTimeStr = formatTime(cycle.end_time);
                 } else {
-                    const endDate = new Date(cycle.end_time);
-                    endTimeStr = endDate.toLocaleTimeString('fr-FR', { timeZone: 'UTC' });
+                    endTimeStr = '-';
                 }
 
-                csv += `${cycle.channel};${dateStr};${startTimeStr};${endTimeStr};${cycle.duration_minutes};${cycle.avg_power_w};${status}\\n`;
+                csv += deviceId + ';' + cycle.channel + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + cycle.avg_power_w + ';' + status + '\\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = `cycles_pompes_filtreplante_${new Date().toISOString().split('T')[0]}.csv`;
+            link.download = 'cycles_pompes_filtreplante_' + new Date().toISOString().split('T')[0] + '.csv';
             link.click();
         }
     </script>

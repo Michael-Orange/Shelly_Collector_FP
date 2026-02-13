@@ -11,14 +11,22 @@ def detect_cycles(
         return []
 
     cycles = []
-    grouped_by_channel = {}
+    grouped = {}
 
-    for timestamp, channel, apower in records:
-        if channel not in grouped_by_channel:
-            grouped_by_channel[channel] = []
-        grouped_by_channel[channel].append((timestamp, apower))
+    has_device_id = len(records[0]) >= 4
 
-    for channel, channel_records in grouped_by_channel.items():
+    for record in records:
+        timestamp = record[0]
+        channel = record[1]
+        apower = record[2]
+        dev_id = record[3] if has_device_id else "unknown"
+
+        key = (dev_id, channel)
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append((timestamp, apower))
+
+    for (dev_id, channel), channel_records in grouped.items():
         if not channel_records:
             continue
 
@@ -42,6 +50,7 @@ def detect_cycles(
                     avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
 
                     cycles.append({
+                        "device_id": dev_id,
                         "channel": channel,
                         "start_time": cycle_start,
                         "end_time": cycle_end,
@@ -67,6 +76,7 @@ def detect_cycles(
                 avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
 
                 cycles.append({
+                    "device_id": dev_id,
                     "channel": channel,
                     "start_time": cycle_start,
                     "end_time": cycle_end if not is_ongoing else None,
