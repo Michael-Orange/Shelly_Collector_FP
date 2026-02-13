@@ -295,7 +295,7 @@ def render_dashboard() -> str:
 <body>
     <div class="header">
         <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
-        <p>Suivi en temps reel des cycles de demarrage et d'arret</p>
+        <p>Suivi en temps reel des cycles de demarrage et d'arret | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
     </div>
 
     <div class="container">
@@ -364,7 +364,7 @@ def render_dashboard() -> str:
                 <table>
                     <thead>
                         <tr>
-                            <th>Device ID</th>
+                            <th>Device</th>
                             <th>Canal</th>
                             <th>Date</th>
                             <th>Demarrage</th>
@@ -399,18 +399,31 @@ def render_dashboard() -> str:
             loadDevices();
         });
 
+        function getDeviceName(deviceId) {
+            var configs = (currentData && currentData.configs) || {};
+            var cfg = configs[deviceId];
+            return (cfg && cfg.device_name) ? cfg.device_name : deviceId;
+        }
+
+        function getChannelName(deviceId, channel) {
+            var configs = (currentData && currentData.configs) || {};
+            var cfg = configs[deviceId];
+            if (cfg && cfg.channels && cfg.channels[channel]) return cfg.channels[channel];
+            return channel;
+        }
+
         async function loadDevices() {
             try {
-                const response = await fetch('/api/pump-cycles?start_date=2020-01-01T00:00:00Z&limit=1');
+                const response = await fetch('/api/config/devices');
                 if (!response.ok) return;
                 const data = await response.json();
 
-                if (data.device_ids && data.device_ids.length > 0) {
+                if (data.devices && data.devices.length > 0) {
                     const select = document.getElementById('device-filter');
-                    data.device_ids.forEach(deviceId => {
+                    data.devices.forEach(device => {
                         const option = document.createElement('option');
-                        option.value = deviceId;
-                        option.textContent = deviceId;
+                        option.value = device.device_id;
+                        option.textContent = device.device_name || device.device_id;
                         select.appendChild(option);
                     });
                 }
@@ -496,10 +509,12 @@ def render_dashboard() -> str:
                 const row = document.createElement('tr');
 
                 const deviceId = cycle.device_id || 'N/A';
-                const deviceCell = '<td class="device-id-cell">' + deviceId + '</td>';
+                const deviceName = getDeviceName(deviceId);
+                const deviceCell = '<td class="device-id-cell" title="' + deviceId + '">' + deviceName + '</td>';
 
+                const channelName = getChannelName(deviceId, cycle.channel);
                 const channelClass = 'channel-' + cycle.channel.replace(':', '-');
-                const channelCell = '<td><span class="channel-badge ' + channelClass + '">' + cycle.channel + '</span></td>';
+                const channelCell = '<td><span class="channel-badge ' + channelClass + '" title="' + cycle.channel + '">' + channelName + '</span></td>';
 
                 const dateStr = formatDate(cycle.start_time);
                 const startTimeStr = formatTime(cycle.start_time);
@@ -555,10 +570,12 @@ def render_dashboard() -> str:
                 return;
             }
 
-            let csv = 'Device ID;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Statut\\n';
+            let csv = 'Device;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Statut\\n';
 
             currentData.cycles.forEach(cycle => {
                 const deviceId = cycle.device_id || 'N/A';
+                const deviceName = getDeviceName(deviceId);
+                const channelName = getChannelName(deviceId, cycle.channel);
                 const dateStr = formatDate(cycle.start_time);
                 const startTimeStr = formatTime(cycle.start_time);
 
@@ -573,7 +590,7 @@ def render_dashboard() -> str:
                     endTimeStr = '-';
                 }
 
-                csv += deviceId + ';' + cycle.channel + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + cycle.avg_power_w + ';' + status + '\\n';
+                csv += deviceName + ';' + channelName + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + cycle.avg_power_w + ';' + status + '\\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

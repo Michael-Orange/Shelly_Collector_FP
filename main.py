@@ -5,9 +5,10 @@ import time
 from datetime import datetime, timezone
 
 import config
-from services.database import create_db_pool, close_db_pool, should_write, insert_power_log
+from services.database import create_db_pool, close_db_pool, create_tables, should_write, insert_power_log
 from api.routes import router as api_router
 from web.dashboard import render_dashboard
+from web.admin import render_admin
 
 app = FastAPI()
 app.include_router(api_router)
@@ -50,6 +51,11 @@ async def root():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     return render_dashboard()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    return render_admin()
 
 
 @app.websocket("/ws")
@@ -134,6 +140,7 @@ async def startup():
 
     db_pool = await create_db_pool(config.DATABASE_URL, config.DB_POOL_MIN_SIZE, config.DB_POOL_MAX_SIZE)
     app.state.db_pool = db_pool
+    await create_tables(db_pool)
     print("✅ Shelly WS collector started (simple 1min throttling)", flush=True)
     print("✅ Database: PostgreSQL connected", flush=True)
     print("✅ Request logging: ENABLED (detailed)", flush=True)

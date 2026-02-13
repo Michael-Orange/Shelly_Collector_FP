@@ -4,7 +4,17 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-13 (Latest)**: Multi-device support + date fix:
+**2026-02-13 (Latest)**: Admin config page for custom device/channel names:
+- **New**: `services/config_service.py` - CRUD for device/channel name mappings
+- **New**: `web/admin.py` - Admin page at `/admin` for editing device/channel names
+- **New**: `device_config` table created automatically at startup (no manual migration)
+- **New**: API endpoints: GET `/api/config/devices`, POST `/api/config/device`, POST `/api/config/channel`, DELETE `/api/config/device/{id}`
+- **Dashboard**: Displays custom names (device_name, channel_name) with fallback on technical IDs
+- **Dashboard**: Link to Configuration page in header
+- **CSV**: Uses custom names in export
+- **Auto-discovery**: Devices/channels detected from `power_logs` (no hardcoding)
+
+**2026-02-13**: Multi-device support + date fix:
 - **Fix**: ISO date format bug (`+00:00Z` → `Z` only) — "Invalid Date" in JavaScript resolved
 - **Multi-device**: API `device_id` filter now optional (all devices by default)
 - **Multi-device**: Cycle detector groups by `(device_id, channel)` instead of channel only
@@ -43,18 +53,20 @@ Preferred communication style: Simple, everyday language (French).
 
 ```
 shelly_collector_fp/
-├── main.py                    # FastAPI app, middleware, WebSocket, dashboard route, startup/shutdown
+├── main.py                    # FastAPI app, middleware, WebSocket, dashboard/admin routes, startup/shutdown
 ├── config.py                  # Centralized configuration (DB, throttle, dashboard, device ID)
 ├── services/
 │   ├── __init__.py
-│   ├── database.py            # DB pool (create/close), should_write() throttle, insert_power_log()
-│   └── cycle_detector.py      # detect_cycles() - gap-based ON/OFF cycle detection
+│   ├── database.py            # DB pool (create/close), create_tables(), should_write(), insert_power_log()
+│   ├── cycle_detector.py      # detect_cycles() - gap-based ON/OFF cycle detection
+│   └── config_service.py      # CRUD for device/channel custom names (device_config table)
 ├── api/
 │   ├── __init__.py
-│   └── routes.py              # GET /api/pump-cycles endpoint
+│   └── routes.py              # /api/pump-cycles + /api/config/* endpoints
 ├── web/
 │   ├── __init__.py
-│   └── dashboard.py           # render_dashboard() - Full HTML/CSS/JS page
+│   ├── dashboard.py           # render_dashboard() - Full HTML/CSS/JS page
+│   └── admin.py               # render_admin() - Config page for device/channel names
 ├── models/
 │   ├── __init__.py
 │   └── schemas.py             # Pydantic PowerLogData model
@@ -69,7 +81,12 @@ shelly_collector_fp/
 | `/` | GET | Health check (plain text) |
 | `/ws` | WebSocket | Shelly data collection endpoint |
 | `/dashboard` | GET | Web dashboard (HTML) |
+| `/admin` | GET | Admin config page (HTML) |
 | `/api/pump-cycles` | GET | Cycle data API (JSON) |
+| `/api/config/devices` | GET | List devices with custom names |
+| `/api/config/device` | POST | Update device name |
+| `/api/config/channel` | POST | Update channel name |
+| `/api/config/device/{id}` | DELETE | Delete device config |
 
 ## Dashboard Features
 

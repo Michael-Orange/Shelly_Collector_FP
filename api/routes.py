@@ -3,6 +3,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 import config
 from services.cycle_detector import detect_cycles
+from services.config_service import (
+    get_all_devices_from_logs,
+    get_configs_map,
+    upsert_device_name,
+    upsert_channel_name,
+    delete_device_config
+)
 
 router = APIRouter(prefix="/api")
 
@@ -72,9 +79,12 @@ async def get_pump_cycles(
 
         found_device_ids = list(set(r['device_id'] for r in records))
 
+        configs = await get_configs_map(db_pool)
+
         return {
             "total": len(cycles),
             "device_ids": found_device_ids,
+            "configs": configs,
             "filters": {
                 "device_id": device_id,
                 "channel": channel,
@@ -87,3 +97,84 @@ async def get_pump_cycles(
     except Exception as e:
         print(f"❌ Error in /api/pump-cycles: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+
+
+@router.get("/config/devices")
+async def get_devices_config(request: Request):
+    db_pool = request.app.state.db_pool
+
+    try:
+        devices = await get_all_devices_from_logs(db_pool)
+        configs = await get_configs_map(db_pool)
+
+        for device in devices:
+            did = device['device_id']
+            if did in configs:
+                device['device_name'] = configs[did]['device_name']
+                device['channel_names'] = configs[did]['channels']
+            else:
+                device['device_name'] = None
+                device['channel_names'] = {}
+
+        return {"devices": devices}
+    except Exception as e:
+        print(f"❌ Error in /api/config/devices: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/device")
+async def update_device_name(request: Request):
+    db_pool = request.app.state.db_pool
+
+    try:
+        body = await request.json()
+        did = body.get("device_id")
+        name = body.get("device_name", "").strip() or None
+
+        if not did:
+            raise HTTPException(400, "device_id required")
+
+        await upsert_device_name(db_pool, did, name)
+        print(f"✅ Device name updated: {did} -> {name}", flush=True)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating device name: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/channel")
+async def update_channel_name(request: Request):
+    db_pool = request.app.state.db_pool
+
+    try:
+        body = await request.json()
+        did = body.get("device_id")
+        ch = body.get("channel")
+        name = body.get("channel_name", "").strip() or None
+
+        if not did or not ch:
+            raise HTTPException(400, "device_id and channel required")
+
+        await upsert_channel_name(db_pool, did, ch, name)
+        print(f"✅ Channel name updated: {did}/{ch} -> {name}", flush=True)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating channel name: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/config/device/{device_id}")
+async def delete_device(request: Request, device_id: str):
+    db_pool = request.app.state.db_pool
+
+    try:
+        await delete_device_config(db_pool, device_id)
+        print(f"✅ Device config deleted: {device_id}", flush=True)
+        return {"success": True}
+    except Exception as e:
+        print(f"❌ Error deleting device: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))

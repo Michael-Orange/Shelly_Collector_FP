@@ -16,6 +16,27 @@ async def create_db_pool(database_url: str, min_size: int, max_size: int):
         raise
 
 
+async def create_tables(pool: asyncpg.Pool):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS device_config (
+                id SERIAL PRIMARY KEY,
+                device_id VARCHAR(100) NOT NULL,
+                device_name VARCHAR(100),
+                channel VARCHAR(20),
+                channel_name VARCHAR(100),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(device_id, channel)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_device_config_device 
+            ON device_config(device_id)
+        """)
+    print("✅ Tables verified/created", flush=True)
+
+
 async def close_db_pool(pool: Optional[asyncpg.Pool]):
     if pool:
         try:
