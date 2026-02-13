@@ -1,0 +1,838 @@
+CONTEXTE
+========
+Application Shelly_Collector_FP avec dashboard de monitoring des pompes.
+Actuellement, on affiche les device_id bruts (ex: "shellypro4pm-a0dd6c9ef474") et les canaux techniques (ex: "switch:0").
+
+Besoin business : Permettre de donner des noms personnalisés aux devices et canaux.
+Exemple :
+- shellypro4pm-a0dd6c9ef474 → "Client 1"
+  - switch:0 → "Pompe PR"
+  - switch:1 → "Pompe PS"
+- shellypro4pm-xxx → "Client 2"
+  - switch:0 → "Pompe à eau"
+
+OBJECTIF
+========
+Créer une interface admin pour gérer les noms personnalisés :
+1. Nouvelle table PostgreSQL pour stocker les mappings
+2. Page web /admin pour éditer les noms
+3. API endpoints pour CRUD
+4. Modifier le dashboard pour afficher les noms custom
+
+SPÉCIFICATIONS
+===============
+
+PARTIE 1 : MIGRATION BASE DE DONNÉES
+-------------------------------------
+
+Créer un nouveau fichier : migrations/001_create_device_config.sql
+
+Contenu :
+
+-- Table de configuration des devices et canaux
+CREATE TABLE IF NOT EXISTS device_config (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    device_name VARCHAR(100),
+    channel VARCHAR(20),
+    channel_name VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(device_id, channel)
+);
+
+-- Index pour performances
+CREATE INDEX IF NOT EXISTS idx_device_config_device ON device_config(device_id);
+
+-- Données initiales (optionnel : pré-remplir avec le device existant)
+INSERT INTO device_config (device_id, device_name, channel, channel_name)
+VALUES 
+    ('shellypro4pm-a0dd6c9ef474', NULL, 'switch:0', NULL),
+    ('shellypro4pm-a0dd6c9ef474', NULL, 'switch:1', NULL),
+    ('shellypro4pm-a0dd6c9ef474', NULL, 'switch:2', NULL)
+ON CONFLICT (device_id, channel) DO NOTHING;
+
+Note : Exécuter cette migration manuellement dans PostgreSQL ou via un script Python.
+
+
+PARTIE 2 : SERVICE DE CONFIGURATION
+------------------------------------
+
+Créer services/config_service.py :
+
+"""
+Module: config_service
+Description: Gestion des noms personnalisés des devices et canaux
+Created: 2026-02-13
+Part of Shelly_Collector_FP
+"""
+
+import asyncpg
+from typing import Dict, List, Optional
+
+async def get_all_configs(pool: asyncpg.Pool) -> List[Dict]:
+    """Récupère toutes les configurations devices/canaux."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT device_id, device_name, channel, channel_name, updated_at
+            FROM device_config
+            ORDER BY device_id, channel
+            """
+        )
+    
+    # Grouper par device_id
+    configs = {}
+    for row in rows:
+        device_id = row['device_id']
+        if device_id not in configs:
+            configs[device_id] = {
+                'device_id': device_id,
+                'device_name': row['device_name'],
+                'channels': []
+            }
+        
+        configs[device_id]['channels'].append({
+            'channel': row['channel'],
+            'channel_name': row['channel_name']
+        })
+    
+    return list(configs.values())
+
+async def get_device_name(pool: asyncpg.Pool, device_id: str) -> Optional[str]:
+    """Récupère le nom custom d'un device (ou None)."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT device_name FROM device_config WHERE device_id = $1 LIMIT 1",
+            device_id
+        )
+    return row['device_name'] if row else None
+
+async def get_channel_name(pool: asyncpg.Pool, device_id: str, channel: str) -> Optional[str]:
+    """Récupère le nom custom d'un canal (ou None)."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT channel_name FROM device_config WHERE device_id = $1 AND channel = $2",
+            device_id, channel
+        )
+    return row['channel_name'] if row else None
+
+async def upsert_device_name(pool: asyncpg.Pool, device_id: str, device_name: str):
+    """Créer ou mettre à jour le nom d'un device."""
+    async with pool.acquire() as conn:
+        # Mettre à jour toutes les lignes du device
+        await conn.execute(
+            """
+            INSERT INTO device_config (device_id, device_name, channel)
+            VALUES ($1, $2, 'switch:0'), ($1, $2, 'switch:1'), ($1, $2, 'switch:2')
+            ON CONFLICT (device_id, channel) 
+            DO UPDATE SET device_name = $2, updated_at = NOW()
+            """,
+            device_id, device_name
+        )
+
+async def upsert_channel_name(
+    pool: asyncpg.Pool, 
+    device_id: str, 
+    channel: str, 
+    channel_name: str
+):
+    """Créer ou mettre à jour le nom d'un canal."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO device_config (device_id, channel, channel_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (device_id, channel) 
+            DO UPDATE SET channel_name = $3, updated_at = NOW()
+            """,
+            device_id, channel, channel_name
+        )
+
+async def delete_device_config(pool: asyncpg.Pool, device_id: str):
+    """Supprimer toute la config d'un device."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM device_config WHERE device_id = $1",
+            device_id
+        )
+
+async def ensure_device_exists(pool: asyncpg.Pool, device_id: str):
+    """S'assurer qu'un device a des entrées dans device_config."""
+    async with pool.acquire() as conn:
+        # Vérifier si le device existe
+        exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM device_config WHERE device_id = $1)",
+            device_id
+        )
+        
+        if not exists:
+            # Créer les entrées par défaut
+            await conn.execute(
+                """
+                INSERT INTO device_config (device_id, channel)
+                VALUES ($1, 'switch:0'), ($1, 'switch:1'), ($1, 'switch:2')
+                """,
+                device_id
+            )
+
+
+PARTIE 3 : API ENDPOINTS ADMIN
+-------------------------------
+
+Modifier api/routes.py pour ajouter les routes admin :
+
+from services.config_service import (
+    get_all_configs,
+    upsert_device_name,
+    upsert_channel_name,
+    delete_device_config,
+    ensure_device_exists
+)
+
+# Ajouter ces routes APRÈS les routes existantes
+
+@router.get("/config/devices")
+async def get_devices_config(request: Request):
+    """Récupère la configuration de tous les devices."""
+    db_pool = request.app.state.db_pool
+    
+    try:
+        configs = await get_all_configs(db_pool)
+        return {"devices": configs}
+    except Exception as e:
+        print(f"❌ Error in /api/config/devices: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/config/device")
+async def update_device_name(request: Request):
+    """Créer ou mettre à jour le nom d'un device."""
+    db_pool = request.app.state.db_pool
+    
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        device_name = body.get("device_name")
+        
+        if not device_id:
+            raise HTTPException(status_code=400, detail="device_id required")
+        
+        # S'assurer que le device existe
+        await ensure_device_exists(db_pool, device_id)
+        
+        # Mettre à jour le nom
+        await upsert_device_name(db_pool, device_id, device_name)
+        
+        print(f"✅ Updated device name: {device_id} → {device_name}", flush=True)
+        return {"success": True, "device_id": device_id, "device_name": device_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating device name: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/config/channel")
+async def update_channel_name(request: Request):
+    """Créer ou mettre à jour le nom d'un canal."""
+    db_pool = request.app.state.db_pool
+    
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        channel_name = body.get("channel_name")
+        
+        if not device_id or not channel:
+            raise HTTPException(status_code=400, detail="device_id and channel required")
+        
+        # S'assurer que le device existe
+        await ensure_device_exists(db_pool, device_id)
+        
+        # Mettre à jour le nom du canal
+        await upsert_channel_name(db_pool, device_id, channel, channel_name)
+        
+        print(f"✅ Updated channel name: {device_id}/{channel} → {channel_name}", flush=True)
+        return {"success": True, "device_id": device_id, "channel": channel, "channel_name": channel_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating channel name: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/config/device/{device_id}")
+async def delete_device(request: Request, device_id: str):
+    """Supprimer la configuration d'un device."""
+    db_pool = request.app.state.db_pool
+    
+    try:
+        await delete_device_config(db_pool, device_id)
+        print(f"✅ Deleted device config: {device_id}", flush=True)
+        return {"success": True, "device_id": device_id}
+    except Exception as e:
+        print(f"❌ Error deleting device: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+PARTIE 4 : PAGE ADMIN
+----------------------
+
+Créer web/admin.py :
+
+"""
+Module: admin
+Description: Interface admin pour configurer les noms des devices/canaux
+Created: 2026-02-13
+Part of Shelly_Collector_FP
+Style: Charte graphique FiltrePlante.com
+"""
+
+def render_admin() -> str:
+    """Retourne le HTML de la page admin."""
+    
+    return """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FiltrePlante - Admin Configuration</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            color: #2c3e50;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+        
+        .header a {
+            color: white;
+            text-decoration: none;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+        
+        .header a:hover {
+            opacity: 1;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .device-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            border-left: 4px solid #2d8659;
+        }
+        
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #ecf0f1;
+        }
+        
+        .device-id {
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+        
+        .device-name-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        .device-name-row label {
+            font-weight: 600;
+            color: #1a5738;
+            min-width: 150px;
+        }
+        
+        .device-name-row input {
+            flex: 1;
+            padding: 0.6rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 0.95rem;
+        }
+        
+        .device-name-row input:focus {
+            outline: none;
+            border-color: #2d8659;
+        }
+        
+        .channels {
+            margin-left: 2rem;
+        }
+        
+        .channel-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 0.8rem;
+        }
+        
+        .channel-label {
+            min-width: 100px;
+            font-weight: 500;
+            color: #34495e;
+        }
+        
+        .channel-row input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .channel-row input:focus {
+            outline: none;
+            border-color: #2d8659;
+        }
+        
+        button {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-save {
+            background: #2d8659;
+            color: white;
+        }
+        
+        .btn-save:hover {
+            background: #1a5738;
+            transform: translateY(-1px);
+        }
+        
+        .btn-delete {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-delete:hover {
+            background: #c0392b;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            border: 3px solid #ecf0f1;
+            border-top: 3px solid #2d8659;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .success-msg {
+            background: #d4edda;
+            color: #155724;
+            padding: 0.8rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        .error-msg {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 0.8rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .device-name-row,
+            .channel-row {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .device-name-row label,
+            .channel-label {
+                min-width: auto;
+            }
+            
+            .channels {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🌱 FiltrePlante - Configuration</h1>
+        <p>Gestion des noms personnalisés des devices et canaux • <a href="/dashboard">← Retour au dashboard</a></p>
+    </div>
+    
+    <div class="container">
+        <div id="success-msg" class="success-msg"></div>
+        <div id="error-msg" class="error-msg"></div>
+        
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Chargement de la configuration...</p>
+        </div>
+        
+        <div id="devices-container" style="display: none;">
+        </div>
+    </div>
+    
+    <script>
+        let devicesData = [];
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDevices();
+        });
+        
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/config/devices');
+                if (!response.ok) throw new Error('Erreur chargement');
+                
+                const data = await response.json();
+                devicesData = data.devices;
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('devices-container').style.display = 'block';
+                
+                renderDevices();
+            } catch (e) {
+                console.error(e);
+                showError('Erreur lors du chargement de la configuration');
+            }
+        }
+        
+        function renderDevices() {
+            const container = document.getElementById('devices-container');
+            container.innerHTML = '';
+            
+            devicesData.forEach(device => {
+                const card = document.createElement('div');
+                card.className = 'device-card';
+                
+                const displayName = device.device_name || device.device_id;
+                
+                card.innerHTML = `
+                    <div class="device-header">
+                        <div>
+                            <div class="device-id">📱 ${device.device_id}</div>
+                        </div>
+                        <button class="btn-delete" onclick="deleteDevice('${device.device_id}')">
+                            🗑️ Supprimer
+                        </button>
+                    </div>
+                    
+                    <div class="device-name-row">
+                        <label>Nom du device :</label>
+                        <input 
+                            type="text" 
+                            id="device-name-${device.device_id}"
+                            value="${device.device_name || ''}"
+                            placeholder="Ex: Client 1"
+                        >
+                        <button class="btn-save" onclick="saveDeviceName('${device.device_id}')">
+                            💾 Enregistrer
+                        </button>
+                    </div>
+                    
+                    <div class="channels">
+                        ${device.channels.map(ch => `
+                            <div class="channel-row">
+                                <span class="channel-label">${ch.channel}</span>
+                                <input 
+                                    type="text" 
+                                    id="channel-name-${device.device_id}-${ch.channel}"
+                                    value="${ch.channel_name || ''}"
+                                    placeholder="Ex: Pompe PR"
+                                >
+                                <button class="btn-save" onclick="saveChannelName('${device.device_id}', '${ch.channel}')">
+                                    💾
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+        
+        async function saveDeviceName(deviceId) {
+            const input = document.getElementById(`device-name-${deviceId}`);
+            const deviceName = input.value.trim();
+            
+            try {
+                const response = await fetch('/api/config/device', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ device_id: deviceId, device_name: deviceName })
+                });
+                
+                if (!response.ok) throw new Error('Erreur sauvegarde');
+                
+                showSuccess(`Nom du device enregistré : ${deviceName || '(vide)'}`);
+                loadDevices();
+            } catch (e) {
+                console.error(e);
+                showError('Erreur lors de la sauvegarde');
+            }
+        }
+        
+        async function saveChannelName(deviceId, channel) {
+            const input = document.getElementById(`channel-name-${deviceId}-${channel}`);
+            const channelName = input.value.trim();
+            
+            try {
+                const response = await fetch('/api/config/channel', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        device_id: deviceId, 
+                        channel: channel, 
+                        channel_name: channelName 
+                    })
+                });
+                
+                if (!response.ok) throw new Error('Erreur sauvegarde');
+                
+                showSuccess(`Nom du canal ${channel} enregistré : ${channelName || '(vide)'}`);
+            } catch (e) {
+                console.error(e);
+                showError('Erreur lors de la sauvegarde');
+            }
+        }
+        
+        async function deleteDevice(deviceId) {
+            if (!confirm(`Supprimer la configuration de ${deviceId} ?`)) return;
+            
+            try {
+                const response = await fetch(`/api/config/device/${deviceId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) throw new Error('Erreur suppression');
+                
+                showSuccess('Device supprimé');
+                loadDevices();
+            } catch (e) {
+                console.error(e);
+                showError('Erreur lors de la suppression');
+            }
+        }
+        
+        function showSuccess(message) {
+            const el = document.getElementById('success-msg');
+            el.textContent = '✅ ' + message;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        }
+        
+        function showError(message) {
+            const el = document.getElementById('error-msg');
+            el.textContent = '❌ ' + message;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 5000);
+        }
+    </script>
+</body>
+</html>
+    """
+
+
+PARTIE 5 : INTÉGRER DANS MAIN.PY
+---------------------------------
+
+Modifier main.py pour ajouter la route /admin :
+
+from web.admin import render_admin
+
+# Ajouter après la route /dashboard
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """Interface admin pour configurer les devices."""
+    return render_admin()
+
+
+PARTIE 6 : MODIFIER LE DASHBOARD POUR UTILISER LES NOMS
+--------------------------------------------------------
+
+Modifier api/routes.py dans la fonction get_pump_cycles() :
+
+# Après avoir récupéré les records, enrichir avec les noms custom
+from services.config_service import get_all_configs
+
+# Récupérer les configs
+configs_list = await get_all_configs(db_pool)
+configs_map = {}
+for cfg in configs_list:
+    device_id = cfg['device_id']
+    configs_map[device_id] = {
+        'device_name': cfg['device_name'] or device_id,
+        'channels': {ch['channel']: ch['channel_name'] or ch['channel'] for ch in cfg['channels']}
+    }
+
+# Dans le retour JSON, ajouter les noms
+for cycle in cycles:
+    device_id = config.SHELLY_DEVICE_ID  # ou extraire depuis les données
+    if device_id in configs_map:
+        cycle['device_name'] = configs_map[device_id]['device_name']
+        cycle['channel_display'] = configs_map[device_id]['channels'].get(cycle['channel'], cycle['channel'])
+
+return {
+    "total": len(cycles),
+    "device_ids": list(set([r['device_id'] for r in records])),
+    "configs": configs_map,  # Ajouter les configs pour le frontend
+    "filters": {...},
+    "cycles": cycles
+}
+
+
+PARTIE 7 : MODIFIER LE DASHBOARD HTML
+--------------------------------------
+
+Dans web/dashboard.py, modifier la fonction renderTable() :
+
+// Extraire les noms custom depuis currentData.configs
+const deviceName = currentData.configs && currentData.configs[deviceId] 
+    ? currentData.configs[deviceId].device_name 
+    : deviceId;
+
+const channelDisplay = cycle.channel_display || cycle.channel;
+
+// Utiliser deviceName et channelDisplay dans le HTML
+row.innerHTML = `
+    <td style="font-size: 0.85rem;">${deviceName}</td>
+    <td><span class="channel-badge ${channelClass}">${channelDisplay}</span></td>
+    ...
+`;
+
+
+TESTS DE VALIDATION
+===================
+
+1. ✅ Migration SQL exécutée sans erreur
+   - Table device_config créée
+   - Index créé
+   - Données initiales insérées
+
+2. ✅ Page /admin accessible
+   - Liste des devices affichée
+   - Champs de saisie visibles
+
+3. ✅ Modifier le nom d'un device
+   - Taper "Client 1"
+   - Cliquer "Enregistrer"
+   - Message de succès affiché
+   - Nom sauvegardé en DB
+
+4. ✅ Modifier le nom d'un canal
+   - Taper "Pompe PR" pour switch:0
+   - Cliquer "Enregistrer"
+   - Message de succès affiché
+   - Nom sauvegardé en DB
+
+5. ✅ Dashboard affiche les noms custom
+   - Recharger /dashboard
+   - Colonne "Device ID" affiche "Client 1" au lieu du code technique
+   - Colonne "Canal" affiche "Pompe PR" au lieu de "switch:0"
+
+6. ✅ Export CSV avec noms custom
+   - Exporter CSV depuis dashboard
+   - Vérifier que les noms custom sont dans le fichier
+
+7. ✅ Supprimer un device
+   - Cliquer "Supprimer"
+   - Confirmer
+   - Device supprimé de la liste
+
+8. ✅ Plusieurs devices
+   - Ajouter un 2ème Shelly
+   - Vérifier qu'il apparaît dans /admin
+   - Lui donner un nom différent
+   - Dashboard affiche les 2 devices avec leurs noms
+
+LIVRABLES
+=========
+- migrations/001_create_device_config.sql créé
+- services/config_service.py créé (~150 lignes)
+- api/routes.py modifié (+80 lignes pour endpoints admin)
+- web/admin.py créé (~300 lignes HTML/CSS/JS)
+- main.py modifié (+3 lignes pour route /admin)
+- web/dashboard.py modifié (utilisation des noms custom)
+- Page /admin accessible et fonctionnelle
+- Dashboard affiche les noms custom
+- Export CSV inclut les noms custom
+
+POINTS D'ATTENTION
+==================
+1. La migration SQL doit être exécutée manuellement dans PostgreSQL
+2. Les noms custom sont optionnels (si NULL, on affiche l'ID brut)
+3. La suppression d'un device dans /admin ne supprime pas les données dans power_logs
+4. Si un nouveau device apparaît, il faut appeler ensure_device_exists() au premier log
+5. Les noms custom sont chargés à chaque appel API (pas de cache pour simplifier)
+✅ RÉSUMÉ
+Ce qui sera créé :
+✅ Table device_config pour stocker les noms
+✅ Page /admin pour éditer les noms (style FiltrePlante)
+✅ API CRUD pour gérer les noms
+✅ Dashboard modifié pour afficher les noms custom
+✅ Export CSV avec noms custom
+Exemple final :
+Client	Pompe	Date	Démarrage	Arrêt	Durée	Puissance
+Client 1	Pompe PR	27/11/2025	14h30	14h58	28 min	461.5 W
+Client 1	Pompe PS	27/11/2025	10h02	10h34	32 min	439.2 W

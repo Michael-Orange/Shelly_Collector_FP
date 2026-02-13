@@ -1,0 +1,423 @@
+📋 BRIEF SIMPLIFIÉ - CONFIG DEVICES
+Copie-colle ce bloc dans Replit Agent :
+CONTEXTE
+========
+Application Shelly_Collector_FP avec dashboard de monitoring.
+Besoin : Donner des noms custom aux devices et canaux pour plus de lisibilité.
+Exemple : "shellypro4pm-xxx" → "Client 1", "switch:0" → "Pompe PR"
+
+OBJECTIF
+========
+Créer une interface admin simple pour nommer les devices/canaux :
+1. Table device_config créée automatiquement au startup
+2. Page /admin pour éditer les noms
+3. API pour CRUD
+4. Dashboard affiche les noms (fallback sur ID si pas de nom)
+
+Simplicité : Détecter les devices/canaux depuis power_logs au lieu de les hardcoder.
+
+SPÉCIFICATIONS
+===============
+
+PARTIE 1 : TABLE DEVICE_CONFIG (création automatique)
+------------------------------------------------------
+
+Modifier services/database.py pour ajouter une fonction create_tables() :
+
+async def create_tables(pool: asyncpg.Pool):
+    """Créer les tables nécessaires si elles n'existent pas."""
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS device_config (
+                id SERIAL PRIMARY KEY,
+                device_id VARCHAR(100) NOT NULL,
+                device_name VARCHAR(100),
+                channel VARCHAR(20),
+                channel_name VARCHAR(100),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(device_id, channel)
+            )
+        """)
+        
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_device_config_device 
+            ON device_config(device_id)
+        """)
+        
+        print("✅ Tables verified/created", flush=True)
+
+Modifier main.py dans la fonction startup() :
+
+@app.on_event("startup")
+async def startup():
+    global db_pool
+    print("🚀 Starting Shelly Collector...", flush=True)
+    db_pool = await create_db_pool(
+        config.DATABASE_URL,
+        config.DB_POOL_MIN_SIZE,
+        config.DB_POOL_MAX_SIZE
+    )
+    app.state.db_pool = db_pool
+    
+    # 🆕 Créer les tables si nécessaire
+    await create_tables(db_pool)
+
+
+PARTIE 2 : SERVICE CONFIG (détection auto des devices/canaux)
+--------------------------------------------------------------
+
+Créer services/config_service.py :
+
+import asyncpg
+from typing import Dict, List, Optional
+
+async def get_all_devices_from_logs(pool: asyncpg.Pool) -> List[Dict]:
+    """Récupère les devices/canaux existants depuis power_logs."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT DISTINCT device_id, channel
+            FROM power_logs
+            ORDER BY device_id, channel
+        """)
+    
+    devices = {}
+    for row in rows:
+        device_id = row['device_id']
+        if device_id not in devices:
+            devices[device_id] = []
+        devices[device_id].append(row['channel'])
+    
+    return [{'device_id': k, 'channels': v} for k, v in devices.items()]
+
+async def get_configs_map(pool: asyncpg.Pool) -> Dict:
+    """Retourne un dict {device_id: {device_name, channels: {channel: name}}}."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT device_id, device_name, channel, channel_name
+            FROM device_config
+        """)
+    
+    configs = {}
+    for row in rows:
+        device_id = row['device_id']
+        if device_id not in configs:
+            configs[device_id] = {
+                'device_name': row['device_name'],
+                'channels': {}
+            }
+        configs[device_id]['channels'][row['channel']] = row['channel_name']
+    
+    return configs
+
+async def upsert_device_name(pool: asyncpg.Pool, device_id: str, device_name: str):
+    """Mettre à jour le nom d'un device pour tous ses canaux existants."""
+    async with pool.acquire() as conn:
+        # Récupérer les canaux existants pour ce device
+        channels = await conn.fetch("""
+            SELECT DISTINCT channel FROM power_logs WHERE device_id = $1
+        """, device_id)
+        
+        # Upsert pour chaque canal
+        for ch in channels:
+            await conn.execute("""
+                INSERT INTO device_config (device_id, device_name, channel)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (device_id, channel) 
+                DO UPDATE SET device_name = $2, updated_at = NOW()
+            """, device_id, device_name, ch['channel'])
+
+async def upsert_channel_name(pool: asyncpg.Pool, device_id: str, channel: str, channel_name: str):
+    """Mettre à jour le nom d'un canal."""
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO device_config (device_id, channel, channel_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (device_id, channel) 
+            DO UPDATE SET channel_name = $3, updated_at = NOW()
+        """, device_id, channel, channel_name)
+
+async def delete_device_config(pool: asyncpg.Pool, device_id: str):
+    """Supprimer la config d'un device."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM device_config WHERE device_id = $1", device_id)
+
+
+PARTIE 3 : API ADMIN
+---------------------
+
+Modifier api/routes.py pour ajouter :
+
+from services.config_service import (
+    get_all_devices_from_logs,
+    get_configs_map,
+    upsert_device_name,
+    upsert_channel_name,
+    delete_device_config
+)
+
+@router.get("/config/devices")
+async def get_devices_config(request: Request):
+    """Récupère les devices depuis power_logs + leurs noms custom."""
+    db_pool = request.app.state.db_pool
+    
+    # Devices existants dans power_logs
+    devices = await get_all_devices_from_logs(db_pool)
+    
+    # Noms custom
+    configs = await get_configs_map(db_pool)
+    
+    # Merge
+    for device in devices:
+        device_id = device['device_id']
+        if device_id in configs:
+            device['device_name'] = configs[device_id]['device_name']
+            device['channel_names'] = configs[device_id]['channels']
+        else:
+            device['device_name'] = None
+            device['channel_names'] = {}
+    
+    return {"devices": devices}
+
+@router.post("/config/device")
+async def update_device_name(request: Request):
+    db_pool = request.app.state.db_pool
+    body = await request.json()
+    device_id = body.get("device_id")
+    device_name = body.get("device_name", "").strip() or None
+    
+    if not device_id:
+        raise HTTPException(400, "device_id required")
+    
+    await upsert_device_name(db_pool, device_id, device_name)
+    print(f"✅ Device name updated: {device_id} → {device_name}", flush=True)
+    return {"success": True}
+
+@router.post("/config/channel")
+async def update_channel_name(request: Request):
+    db_pool = request.app.state.db_pool
+    body = await request.json()
+    device_id = body.get("device_id")
+    channel = body.get("channel")
+    channel_name = body.get("channel_name", "").strip() or None
+    
+    if not device_id or not channel:
+        raise HTTPException(400, "device_id and channel required")
+    
+    await upsert_channel_name(db_pool, device_id, channel, channel_name)
+    print(f"✅ Channel name updated: {device_id}/{channel} → {channel_name}", flush=True)
+    return {"success": True}
+
+@router.delete("/config/device/{device_id}")
+async def delete_device(request: Request, device_id: str):
+    db_pool = request.app.state.db_pool
+    await delete_device_config(db_pool, device_id)
+    print(f"✅ Device config deleted: {device_id}", flush=True)
+    return {"success": True}
+
+
+PARTIE 4 : PAGE ADMIN (concise)
+--------------------------------
+
+Créer web/admin.py avec le même style que dashboard.py mais plus court :
+
+def render_admin() -> str:
+    return """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FiltrePlante - Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f8f9fa; }
+        .header { background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%); color: white; padding: 2rem; }
+        .header h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+        .header a { color: white; text-decoration: none; opacity: 0.8; }
+        .header a:hover { opacity: 1; }
+        .container { max-width: 1200px; margin: 2rem auto; padding: 0 2rem; }
+        .device-card { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid #2d8659; }
+        .device-id { font-family: monospace; color: #7f8c8d; margin-bottom: 1rem; }
+        .input-row { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
+        .input-row label { min-width: 120px; font-weight: 600; color: #1a5738; }
+        .input-row input { flex: 1; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; }
+        .input-row input:focus { outline: none; border-color: #2d8659; }
+        button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s; }
+        .btn-save { background: #2d8659; color: white; }
+        .btn-save:hover { background: #1a5738; }
+        .channels { margin-left: 2rem; }
+        .msg { padding: 0.8rem; border-radius: 6px; margin-bottom: 1rem; display: none; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🌱 FiltrePlante - Configuration</h1>
+        <p><a href="/dashboard">← Retour au dashboard</a></p>
+    </div>
+    
+    <div class="container">
+        <div id="msg" class="msg"></div>
+        <div id="devices"></div>
+    </div>
+    
+    <script>
+        let data = [];
+        
+        fetch('/api/config/devices')
+            .then(r => r.json())
+            .then(d => {
+                data = d.devices;
+                render();
+            });
+        
+        function render() {
+            const container = document.getElementById('devices');
+            container.innerHTML = data.map(device => {
+                const deviceName = device.device_name || '';
+                return `
+                    <div class="device-card">
+                        <div class="device-id">📱 ${device.device_id}</div>
+                        <div class="input-row">
+                            <label>Nom device:</label>
+                            <input id="dn-${device.device_id}" value="${deviceName}" placeholder="Ex: Client 1">
+                            <button class="btn-save" onclick="saveDev('${device.device_id}')">💾</button>
+                        </div>
+                        <div class="channels">
+                            ${device.channels.map(ch => {
+                                const chName = device.channel_names[ch] || '';
+                                return `
+                                    <div class="input-row">
+                                        <label>${ch}:</label>
+                                        <input id="cn-${device.device_id}-${ch}" value="${chName}" placeholder="Ex: Pompe PR">
+                                        <button class="btn-save" onclick="saveCh('${device.device_id}','${ch}')">💾</button>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function saveDev(deviceId) {
+            const name = document.getElementById(`dn-${deviceId}`).value.trim();
+            const res = await fetch('/api/config/device', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({device_id: deviceId, device_name: name})
+            });
+            showMsg(res.ok ? 'success' : 'error', res.ok ? 'Enregistré ✅' : 'Erreur ❌');
+        }
+        
+        async function saveCh(deviceId, channel) {
+            const name = document.getElementById(`cn-${deviceId}-${channel}`).value.trim();
+            const res = await fetch('/api/config/channel', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({device_id: deviceId, channel: channel, channel_name: name})
+            });
+            showMsg(res.ok ? 'success' : 'error', res.ok ? 'Enregistré ✅' : 'Erreur ❌');
+        }
+        
+        function showMsg(type, text) {
+            const el = document.getElementById('msg');
+            el.className = 'msg ' + type;
+            el.textContent = text;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 2000);
+        }
+    </script>
+</body>
+</html>
+    """
+
+Ajouter dans main.py :
+
+from web.admin import render_admin
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    return render_admin()
+
+
+PARTIE 5 : DASHBOARD UTILISE LES NOMS
+--------------------------------------
+
+Modifier api/routes.py dans get_pump_cycles() :
+
+# Après avoir récupéré les records, charger les configs
+from services.config_service import get_configs_map
+
+configs = await get_configs_map(db_pool)
+
+# Dans le retour JSON, ajouter configs
+return {
+    "total": len(cycles),
+    "device_ids": list(set([r['device_id'] for r in records])),
+    "configs": configs,  # 🆕
+    "filters": {...},
+    "cycles": cycles
+}
+
+Modifier web/dashboard.py dans renderTable() du JavaScript :
+
+// Récupérer configs
+const configs = currentData.configs || {};
+
+cycles.forEach(cycle => {
+    // Device name
+    const deviceId = currentData.device_id || 'N/A';
+    const deviceName = configs[deviceId]?.device_name || deviceId;
+    
+    // Channel name
+    const channelName = configs[deviceId]?.channels?.[cycle.channel] || cycle.channel;
+    
+    // Utiliser deviceName et channelName dans le HTML
+    row.innerHTML = `
+        <td style="font-size: 0.85rem;">${deviceName}</td>
+        <td><span class="channel-badge ${channelClass}">${channelName}</span></td>
+        ...
+    `;
+});
+
+Idem dans exportCSV() :
+
+const deviceName = configs[deviceId]?.device_name || deviceId;
+const channelName = configs[deviceId]?.channels?.[cycle.channel] || cycle.channel;
+csv += `${deviceName};${channelName};...`;
+
+
+TESTS
+=====
+1. ✅ App démarre → Table device_config créée
+2. ✅ Page /admin accessible → Liste des devices depuis power_logs
+3. ✅ Modifier nom device → Sauvegardé en DB
+4. ✅ Modifier nom canal → Sauvegardé en DB
+5. ✅ Dashboard affiche noms custom (fallback sur ID)
+6. ✅ Export CSV avec noms custom
+
+RÉSULTAT ATTENDU
+=================
+Dashboard affiche :
+| Client | Pompe | Date | ... |
+|--------|-------|------|-----|
+| Client 1 | Pompe PR | 27/11 | ... |
+
+Au lieu de :
+| shellypro4pm-a0dd6c9ef474 | switch:0 | 27/11 | ... |
+✅ DIFFÉRENCES AVEC LE BRIEF INITIAL
+Point	Brief initial	Brief simplifié
+Migration SQL	Manuelle	Automatique au startup ✅
+Détection canaux	Hardcodé (3 canaux)	Depuis power_logs ✅
+HTML admin	300 lignes	100 lignes ✅
+Complexité	Détaillée	Essentiel seulement ✅
+🎯 AVANTAGES
+✅ Pas de migration manuelle → Table créée au startup
+✅ Support de N canaux → Détectés depuis power_logs
+✅ Code plus court → Admin en ~100 lignes HTML
+✅ Fallback intelligent → Si pas de nom custom, affiche l'ID
+✅ Auto-discovery → Si un nouveau device apparaît dans power_logs, il apparaît dans /admin
+Tu valides cette version simplifiée ? 🚀
