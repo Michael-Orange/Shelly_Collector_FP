@@ -1,26 +1,26 @@
 # Overview
 
-This project is a **Shelly device data collector** that receives real-time power consumption data via WebSocket and logs it to a PostgreSQL database. The system uses a simple 1-minute throttling mechanism to log telemetry data from Shelly smart switches.
-
-The primary goal is to monitor power channels and log their consumption data with minimal complexity - one write per minute per active channel.
+This project is a **Shelly device data collector and monitoring dashboard** that receives real-time power consumption data via WebSocket and logs it to a PostgreSQL database. It includes a web dashboard to visualize pump operation cycles with filtering and CSV export.
 
 # Recent Changes
 
-**2026-02-13 (Latest)**: Modular architecture refactoring:
-- **Refactored** from single `main.py` (166 lines) into modular structure
-- **New**: `config.py` - Centralized configuration (DB pool, throttle interval, future dashboard config)
-- **New**: `services/database.py` - DB pool management, throttle logic (`should_write`), insert function
-- **New**: `models/schemas.py` - Pydantic `PowerLogData` model (prepared for future dashboard)
-- **Refactored**: `main.py` (~120 lines) - Orchestration only (middleware, routes, startup/shutdown)
-- **Zero behavioral changes**: All RPC bootstrap, throttle keys, channel parsing, logging preserved exactly
-- **Architect review**: Timezone bug caught and fixed (UTC consistency maintained)
+**2026-02-13 (Latest)**: Dashboard and cycle detection added:
+- **New**: `services/cycle_detector.py` - Detects pump ON/OFF cycles via gap analysis (3min gap = pump stopped)
+- **New**: `api/routes.py` - GET `/api/pump-cycles` endpoint returning cycle data as JSON
+- **New**: `web/dashboard.py` - Full HTML dashboard with FiltrePlante style (#2d8659 green)
+- **New**: `/dashboard` route serving the web interface
+- **Features**: Filter by channel/date, export CSV (French format), stats cards, ongoing cycle detection
+- **Config**: Added `SHELLY_DEVICE_ID` to centralize device ID
+- **Architecture**: `db_pool` stored in `app.state` to avoid circular imports
+
+**2026-02-13**: Modular architecture refactoring:
+- Refactored from single `main.py` into modular structure
+- `config.py`, `services/database.py`, `models/schemas.py`
+- Zero behavioral changes, timezone bug caught and fixed
 
 **2025-10-11**: Complete system rewrite - Ultra-simplified architecture:
-- Simple 1-minute throttling per channel (last_write_time dictionary)
-- Code reduction: From 321 lines → 110 lines (simple throttling)
-
-**2025-10-11**: Cost optimization - reduced resource usage:
-- PostgreSQL pool: Reduced max_size from 10 → 3 connections
+- Simple 1-minute throttling per channel
+- Code reduction: 321 lines → 110 lines
 
 # User Preferences
 
@@ -32,69 +32,61 @@ Preferred communication style: Simple, everyday language (French).
 
 ```
 shelly_collector_fp/
-├── main.py                    # FastAPI app, middleware, WebSocket route, startup/shutdown (~120 lines)
-├── config.py                  # Centralized configuration (DB, throttle, dashboard constants)
+├── main.py                    # FastAPI app, middleware, WebSocket, dashboard route, startup/shutdown
+├── config.py                  # Centralized configuration (DB, throttle, dashboard, device ID)
 ├── services/
 │   ├── __init__.py
-│   └── database.py            # DB pool (create/close), should_write() throttle, insert_power_log()
+│   ├── database.py            # DB pool (create/close), should_write() throttle, insert_power_log()
+│   └── cycle_detector.py      # detect_cycles() - gap-based ON/OFF cycle detection
+├── api/
+│   ├── __init__.py
+│   └── routes.py              # GET /api/pump-cycles endpoint
+├── web/
+│   ├── __init__.py
+│   └── dashboard.py           # render_dashboard() - Full HTML/CSS/JS page
 ├── models/
 │   ├── __init__.py
-│   └── schemas.py             # Pydantic PowerLogData model (for future dashboard)
-├── pyproject.toml              # Python dependencies
-└── replit.md                   # This file
+│   └── schemas.py             # Pydantic PowerLogData model
+├── pyproject.toml
+└── replit.md
 ```
 
-## Core Framework & Server
-- **FastAPI** web framework with WebSocket support
-- **Uvicorn ASGI** server for production deployment
-- Hosted on **Replit** with public WebSocket endpoint at `/ws`
-- HTTP health check endpoint at `/` returning plain text status
+## Routes
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/` | GET | Health check (plain text) |
+| `/ws` | WebSocket | Shelly data collection endpoint |
+| `/dashboard` | GET | Web dashboard (HTML) |
+| `/api/pump-cycles` | GET | Cycle data API (JSON) |
+
+## Dashboard Features
+
+- **Cycle detection**: Gap >= 3 minutes between measurements = pump stopped
+- **Minimum cycle**: Cycles < 2 minutes filtered out (noise)
+- **Default view**: Last 45 days
+- **Filters**: Channel (switch:0/1/2), date range
+- **Stats cards**: Total cycles, ongoing, avg duration, avg power
+- **Export CSV**: French format (semicolon separator)
+- **Ongoing cycles**: Marked as "En cours" if last measurement < 3 min ago
+- **Style**: FiltrePlante green theme (#2d8659)
+- **Timezone**: UTC+0 (Senegal, no conversion needed)
 
 ## Data Collection Strategy
-
-**Ultra-Simple Throttling System**:
 
 **Cloudflare Worker Prefiltering** (upstream):
 - Worker URL: `wss://shelly-filter-proxy.michael-orange09.workers.dev`
 - Filters messages to >10W only on valid channels (0, 1, 2)
-- Lazy connection: Only connects to Replit when >10W detected (cost optimization)
-- Server receives ONLY relevant messages (active equipment)
+- Lazy connection: Only connects to Replit when >10W detected
 
 **1-Minute Throttling** (in `services/database.py`):
-- `should_write()` function with state key format: `{device_id}_ch{channel_int}`
+- `should_write()` with state key format: `{device_id}_ch{channel_int}`
 - On message arrival: If >1 minute since last write → write to DB
-- All writes labeled as "sample"
 
 **RPC Bootstrap** (in `main.py`):
 - Sent via `send_text()` (NOT `send_json()`) with `"src":"collector"`
-- Command 1: `NotifyStatus` with `enable: true` to start streaming
-- Command 2: `Shelly.GetStatus` to retrieve immediate status
-- Critical for Shelly to begin sending data
-
-## State Management
-
-**Minimal in-memory state** using Python dictionary:
-- `last_write_time = {}`: Stores last write timestamp per device/channel
-- Format: `{"deviceid_ch0": datetime, "deviceid_ch2": datetime, ...}`
-
-## Data Storage
-
-**PostgreSQL database** (`power_logs` table)
-- Schema: `timestamp, device_id, channel, apower_w, voltage_v, current_a, energy_total_wh`
-- UTC timestamps stored as TIMESTAMPTZ
-- Indexed on timestamp and (device_id, channel) for efficient queries
-- Async inserts via asyncpg connection pool (min=1, max=3)
-
-## Message Processing Pipeline
-
-1. **Shelly device** connects to Cloudflare Worker via outbound WebSocket
-2. **Cloudflare Worker** filters >10W messages, lazy-connects to Replit
-3. **WebSocket connection** accepted, RPC bootstrap commands sent
-4. **JSON-RPC message parsing** from `params.switch:{X}` format
-5. **Channel parsing**: `int(key.split(':')[1])` → throttle check with `_ch{int}` key
-6. **Throttling check**: `should_write()` → If >1 minute since last write → proceed
-7. **PostgreSQL insert**: `insert_power_log()` with `f"switch:{channel}"` reconstruction
-8. **Update state**: `last_write_time[key] = now`
+- Command 1: `NotifyStatus` with `enable: true`
+- Command 2: `Shelly.GetStatus`
 
 ## Configuration (config.py)
 
@@ -103,40 +95,25 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DB_POOL_MIN_SIZE = 1
 DB_POOL_MAX_SIZE = 3
 THROTTLE_INTERVAL_SECONDS = 60
-GAP_THRESHOLD_MINUTES = 3        # Future dashboard
-MIN_CYCLE_DURATION_MINUTES = 2   # Future dashboard
-DEFAULT_DAYS_HISTORY = 45        # Future dashboard
+SHELLY_DEVICE_ID = "shellypro4pm-a0dd6c9ef474"
+GAP_THRESHOLD_MINUTES = 3
+MIN_CYCLE_DURATION_MINUTES = 2
+DEFAULT_DAYS_HISTORY = 45
 ```
 
 # External Dependencies
 
 ## Required Python Packages
 - **fastapi** - Web framework for HTTP and WebSocket endpoints
-- **uvicorn** - ASGI server for running FastAPI application
-- **asyncpg** - Async PostgreSQL driver for database operations
+- **uvicorn** - ASGI server
+- **asyncpg** - Async PostgreSQL driver
 - **pydantic** - Data validation (included with FastAPI)
 
-## External Services & Integrations
+## External Services
 
-- **Shelly Smart Devices** - IoT switches/relays (Shelly Pro 4PM)
-  - Protocol: WebSocket (wss://)
-  - Message format: JSON-RPC NotifyStatus messages
-  - Connection: Device → Cloudflare Worker → Replit
-
-- **Cloudflare Worker** - Message filtering proxy
-  - URL: `wss://shelly-filter-proxy.michael-orange09.workers.dev`
-  - Filters >10W messages on channels 0, 1, 2
-  - Lazy backend connection (cost optimization)
-
-- **Replit Hosting Platform**
-  - Deployment: Autoscale
-  - Production URL: `wss://shelly-ws-collector-sagemcom.replit.app/ws`
-
-## Deployment Commands
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 5000
-```
+- **Shelly Pro 4PM** - IoT device (WebSocket JSON-RPC)
+- **Cloudflare Worker** - Message filtering proxy (`wss://shelly-filter-proxy.michael-orange09.workers.dev`)
+- **Replit Autoscale** - Production hosting (`wss://shelly-ws-collector-sagemcom.replit.app/ws`)
 
 ## Database Schema
 
@@ -155,6 +132,12 @@ CREATE TABLE power_logs (
 
 CREATE INDEX idx_power_logs_timestamp ON power_logs(timestamp);
 CREATE INDEX idx_power_logs_device_channel ON power_logs(device_id, channel);
+```
+
+## Deployment
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 5000
 ```
 
 ## Shelly Device Configuration

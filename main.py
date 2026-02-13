@@ -1,13 +1,16 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, HTMLResponse
 import json
 import time
 from datetime import datetime, timezone
 
 import config
 from services.database import create_db_pool, close_db_pool, should_write, insert_power_log
+from api.routes import router as api_router
+from web.dashboard import render_dashboard
 
 app = FastAPI()
+app.include_router(api_router)
 
 last_write_time = {}
 db_pool = None
@@ -42,6 +45,11 @@ async def log_requests(request: Request, call_next):
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "Shelly WS collector running (simple throttling)"
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    return render_dashboard()
 
 
 @app.websocket("/ws")
@@ -125,6 +133,7 @@ async def startup():
         return
 
     db_pool = await create_db_pool(config.DATABASE_URL, config.DB_POOL_MIN_SIZE, config.DB_POOL_MAX_SIZE)
+    app.state.db_pool = db_pool
     print("✅ Shelly WS collector started (simple 1min throttling)", flush=True)
     print("✅ Database: PostgreSQL connected", flush=True)
     print("✅ Request logging: ENABLED (detailed)", flush=True)
