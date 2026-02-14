@@ -1,0 +1,417 @@
+ BRIEF FONCTIONNEL : Ajout Qualité des Eaux Brutes + Impact CO₂e dans Dashboard
+
+## OBJECTIF
+Ajouter la configuration de la qualité des eaux brutes (DBO5, DCO, MES) par device Shelly et afficher l'impact environnemental (émissions CO₂e évitées) dans le dashboard.
+
+## CONTEXTE
+L'application Shelly Collector collecte les données de consommation des pompes de traitement d'eaux usées. Pour calculer l'impact environnemental (émissions de CO₂ évitées vs fosse standard), on a besoin de connaître la concentration en polluants des eaux brutes entrantes.
+
+## 1. MODIFICATIONS BASE DE DONNÉES
+
+### Table device_configs - Ajouter 3 colonnes
+
+```sql
+ALTER TABLE device_configs
+ADD COLUMN IF NOT EXISTS dbo5_mg_l INTEGER DEFAULT 570,
+ADD COLUMN IF NOT EXISTS dco_mg_l INTEGER DEFAULT 1250,
+ADD COLUMN IF NOT EXISTS mes_mg_l INTEGER DEFAULT 650;
+Notes :
+Valeurs par défaut = eaux usées domestiques typiques
+Stockage en mg/L (entiers)
+Par device (chaque site peut avoir des valeurs différentes)
+2. MODIFICATIONS PAGE CONFIGURATION (/web/admin.py)
+Ajouter section "Qualité des eaux brutes"
+Placement : Après le tableau de configuration des pompes, avant le bouton "Enregistrer tout"
+Structure HTML :
+<!-- Séparateur + Titre -->
+<div style="border-top: 2px solid #e5e7eb; margin: 40px 0 30px 0; padding-top: 30px;">
+    <h3 style="font-size: 1.1rem; font-weight: 600; color: #2d8659; margin-bottom: 8px; display: flex; align-items: center;">
+        💧 Qualité des eaux brutes
+    </h3>
+    <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 20px;">
+        ℹ️ Valeurs moyennes estimées des eaux du site
+    </p>
+</div>
+
+<!-- 3 champs en ligne -->
+<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #2d8659;">
+    <!-- DBO5 -->
+    <div>
+        <label style="display: block; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            DBO5 (mg/L)
+        </label>
+        <input 
+            type="number" 
+            id="dbo5_mg_l" 
+            name="dbo5_mg_l" 
+            value="${dbo5_mg_l || 570}"
+            min="0" 
+            max="5000"
+            step="10"
+            style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem;"
+        />
+    </div>
+
+    <!-- DCO -->
+    <div>
+        <label style="display: block; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            DCO (mg/L)
+        </label>
+        <input 
+            type="number" 
+            id="dco_mg_l" 
+            name="dco_mg_l" 
+            value="${dco_mg_l || 1250}"
+            min="0" 
+            max="10000"
+            step="10"
+            style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem;"
+        />
+    </div>
+
+    <!-- MES -->
+    <div>
+        <label style="display: block; font-weight: 500; color: #374151; margin-bottom: 8px;">
+            MES (mg/L)
+        </label>
+        <input 
+            type="number" 
+            id="mes_mg_l" 
+            name="mes_mg_l" 
+            value="${mes_mg_l || 650}"
+            min="0" 
+            max="5000"
+            step="10"
+            style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 1rem;"
+        />
+    </div>
+</div>
+
+<!-- Responsive mobile -->
+<style>
+@media (max-width: 768px) {
+    .water-quality-grid {
+        grid-template-columns: 1fr !important;
+    }
+}
+</style>
+JavaScript - Modification du formulaire de sauvegarde :
+Dans la fonction qui envoie les données au serveur, ajouter :
+const dbo5 = document.getElementById('dbo5_mg_l').value;
+const dco = document.getElementById('dco_mg_l').value;
+const mes = document.getElementById('mes_mg_l').value;
+
+// Ajouter au payload
+body.dbo5_mg_l = parseInt(dbo5);
+body.dco_mg_l = parseInt(dco);
+body.mes_mg_l = parseInt(mes);
+3. MODIFICATIONS API (/api/routes.py)
+A. Endpoint GET /api/config/devices
+Modifier pour inclure les nouveaux champs :
+@router.get("/api/config/devices")
+async def get_devices_config(request: Request):
+    db_pool = request.app.state.db_pool
+    async with db_pool.acquire() as conn:
+        # Modifier la requête pour inclure les nouvelles colonnes
+        rows = await conn.fetch("""
+            SELECT 
+                device_id, 
+                device_name, 
+                channels,
+                dbo5_mg_l,
+                dco_mg_l,
+                mes_mg_l
+            FROM device_configs
+            ORDER BY device_id
+        """)
+        
+        devices = []
+        for row in rows:
+            devices.append({
+                "device_id": row["device_id"],
+                "device_name": row["device_name"],
+                "channels": row["channels"],
+                "dbo5_mg_l": row["dbo5_mg_l"],
+                "dco_mg_l": row["dco_mg_l"],
+                "mes_mg_l": row["mes_mg_l"]
+            })
+        
+        return {"devices": devices}
+B. Endpoint POST /api/config/device
+Modifier pour sauvegarder les nouveaux paramètres :
+@router.post("/api/config/device")
+async def update_device_config(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        device_name = body.get("device_name")
+        channels = body.get("channels")
+        dbo5_mg_l = body.get("dbo5_mg_l", 570)
+        dco_mg_l = body.get("dco_mg_l", 1250)
+        mes_mg_l = body.get("mes_mg_l", 650)
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO device_configs 
+                    (device_id, device_name, channels, dbo5_mg_l, dco_mg_l, mes_mg_l)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (device_id) 
+                DO UPDATE SET 
+                    device_name = EXCLUDED.device_name,
+                    channels = EXCLUDED.channels,
+                    dbo5_mg_l = EXCLUDED.dbo5_mg_l,
+                    dco_mg_l = EXCLUDED.dco_mg_l,
+                    mes_mg_l = EXCLUDED.mes_mg_l
+            """, device_id, device_name, channels, dbo5_mg_l, dco_mg_l, mes_mg_l)
+        
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+4. MODIFICATIONS SERVICE (/services/cycle_detector.py)
+Ajouter fonction de calcul CO₂e
+Ajouter cette fonction dans le fichier :
+def calculate_co2e_impact(volume_m3: float, dbo5_mg_l: float) -> dict:
+    """
+    Calcule l'impact CO2e évité par rapport à une fosse standard.
+    
+    Args:
+        volume_m3: Volume d'eau traitée (m³)
+        dbo5_mg_l: Concentration DBO5 (mg/L)
+    
+    Returns:
+        dict avec:
+        - co2e_avoided_kg: kg CO2e évités
+        - reduction_percent: pourcentage de réduction
+        - ch4_avoided_kg: kg CH4 évités (pour info)
+    """
+    # Constantes
+    DBO5_KG_PER_M3 = dbo5_mg_l / 1000  # Conversion mg/L -> kg/m³
+    BO_FACTOR = 0.6  # kg CH4 / kg DBO5
+    MCF_FOSSE = 0.5  # Facteur de correction méthane fosse standard
+    MCF_FPV = 0.03   # Facteur de correction méthane Filtre Planté Vertical
+    GWP_CH4 = 28     # Pouvoir de Réchauffement Global du CH4 (GIEC AR5)
+    
+    # Calcul masse DBO5 traitée
+    masse_dbo5_kg = volume_m3 * DBO5_KG_PER_M3
+    
+    # Calcul émissions CH4 fosse standard
+    ch4_fosse_kg = masse_dbo5_kg * BO_FACTOR * MCF_FOSSE
+    
+    # Calcul émissions CH4 FPV
+    ch4_fpv_kg = masse_dbo5_kg * BO_FACTOR * MCF_FPV
+    
+    # Calcul CH4 évité
+    ch4_avoided_kg = ch4_fosse_kg - ch4_fpv_kg
+    
+    # Conversion en CO2e
+    co2e_avoided_kg = ch4_avoided_kg * GWP_CH4
+    
+    # Pourcentage de réduction
+    reduction_percent = (ch4_avoided_kg / ch4_fosse_kg * 100) if ch4_fosse_kg > 0 else 0
+    
+    return {
+        "co2e_avoided_kg": round(co2e_avoided_kg, 2),
+        "reduction_percent": round(reduction_percent, 1),
+        "ch4_avoided_kg": round(ch4_avoided_kg, 2)
+    }
+Modifier la fonction get_pump_cycles
+Ajouter le calcul CO2e dans les résultats retournés :
+async def get_pump_cycles(db_pool, device_id=None, channel=None, start_date=None, end_date=None):
+    # ... code existant ...
+    
+    # Récupérer la config DBO5 du device
+    async with db_pool.acquire() as conn:
+        config = await conn.fetchrow("""
+            SELECT dbo5_mg_l FROM device_configs WHERE device_id = $1
+        """, device_id or cycles[0]['device_id'])
+        
+        dbo5_mg_l = config['dbo5_mg_l'] if config else 570
+    
+    # Calculer volume total et impact CO2e
+    total_volume_m3 = sum(c.get('volume_m3', 0) for c in cycles)
+    co2e_impact = calculate_co2e_impact(total_volume_m3, dbo5_mg_l)
+    
+    return {
+        "cycles": cycles,
+        "stats": stats,
+        "co2e_impact": co2e_impact
+    }
+5. MODIFICATIONS DASHBOARD (/web/dashboard.py)
+A. Modifier la section "TRAITEMENT & ABATTEMENT"
+Remplacer la card existante par :
+<div style="background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%); border-radius: 12px; padding: 30px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <h2 style="color: white; margin: 0 0 25px 0; font-size: 1.4rem; display: flex; align-items: center;">
+        💧 TRAITEMENT & IMPACT ENVIRONNEMENTAL
+    </h2>
+    
+    <!-- Grid 4 colonnes -->
+    <div class="stats-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
+        <!-- Colonne 1 : Eau traitée -->
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px; backdrop-filter: blur(10px);">
+            <div style="color: rgba(255,255,255,0.9); font-size: 0.85rem; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                📊 Eau traitée
+            </div>
+            <div style="color: white; font-size: 2rem; font-weight: 700; margin-bottom: 5px;" id="total-volume">
+                --
+            </div>
+            <div style="color: rgba(255,255,255,0.8); font-size: 0.85rem;">
+                m³
+            </div>
+        </div>
+        
+        <!-- Colonne 2 : Par jour -->
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px; backdrop-filter: blur(10px);">
+            <div style="color: rgba(255,255,255,0.9); font-size: 0.85rem; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                📅 Par jour
+            </div>
+            <div style="color: white; font-size: 2rem; font-weight: 700; margin-bottom: 5px;" id="daily-volume">
+                --
+            </div>
+            <div style="color: rgba(255,255,255,0.8); font-size: 0.85rem;">
+                m³/jour
+            </div>
+        </div>
+        
+        <!-- Colonne 3 : Émissions évitées -->
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px; backdrop-filter: blur(10px);">
+            <div style="color: rgba(255,255,255,0.9); font-size: 0.85rem; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                🌱 Émissions évitées
+            </div>
+            <div style="color: white; font-size: 2rem; font-weight: 700; margin-bottom: 5px;" id="co2e-avoided">
+                --
+            </div>
+            <div style="color: rgba(255,255,255,0.8); font-size: 0.85rem;" id="co2e-unit">
+                kg CO₂e
+            </div>
+        </div>
+        
+        <!-- Colonne 4 : Réduction -->
+        <div style="background: rgba(255,255,255,0.15); border-radius: 8px; padding: 20px; backdrop-filter: blur(10px);">
+            <div style="color: rgba(255,255,255,0.9); font-size: 0.85rem; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                ✅ Réduction
+            </div>
+            <div style="color: white; font-size: 2rem; font-weight: 700; margin-bottom: 5px;" id="reduction-percent">
+                --
+            </div>
+            <div style="color: rgba(255,255,255,0.8); font-size: 0.85rem;">
+                %
+            </div>
+        </div>
+    </div>
+    
+    <!-- Ligne d'info -->
+    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.85); font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+        ℹ️ Réduction d'émissions par rapport à une fosse standard
+    </div>
+</div>
+
+<!-- Responsive mobile : stack 2x2 -->
+<style>
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+</style>
+B. Modifier le JavaScript de fetch
+Dans la fonction fetchData(), mettre à jour le traitement de la réponse :
+async function fetchData() {
+    const params = new URLSearchParams({
+        device_id: deviceFilter.value || '',
+        channel: channelFilter.value || '',
+        start_date: startDate.value || '',
+        end_date: endDate.value || ''
+    });
+    
+    const response = await fetch(`/api/pump-cycles?${params}`);
+    const data = await response.json();
+    
+    // Mise à jour volumes
+    const totalVolume = data.stats?.total_volume_m3 || 0;
+    const dailyVolume = data.stats?.avg_volume_per_day_m3 || 0;
+    
+    document.getElementById('total-volume').textContent = totalVolume.toFixed(1);
+    document.getElementById('daily-volume').textContent = dailyVolume.toFixed(2);
+    
+    // Mise à jour impact CO2e
+    if (data.co2e_impact) {
+        const co2eKg = data.co2e_impact.co2e_avoided_kg;
+        const reduction = data.co2e_impact.reduction_percent;
+        
+        // Auto-switch unité : < 1000 kg → kg, >= 1000 kg → tonnes
+        if (co2eKg >= 1000) {
+            document.getElementById('co2e-avoided').textContent = (co2eKg / 1000).toFixed(2);
+            document.getElementById('co2e-unit').textContent = 't CO₂e';
+        } else {
+            document.getElementById('co2e-avoided').textContent = co2eKg.toFixed(0);
+            document.getElementById('co2e-unit').textContent = 'kg CO₂e';
+        }
+        
+        document.getElementById('reduction-percent').textContent = reduction.toFixed(0);
+    } else {
+        document.getElementById('co2e-avoided').textContent = '0';
+        document.getElementById('reduction-percent').textContent = '0';
+    }
+    
+    // ... reste du code pour tableau cycles ...
+}
+6. TESTS À EFFECTUER
+A. Tests configuration
+Accéder à /admin
+Vérifier que les 3 champs (DBO5, DCO, MES) s'affichent avec valeurs par défaut
+Modifier les valeurs et cliquer "Enregistrer tout"
+Recharger la page → vérifier que les valeurs sont bien sauvegardées
+B. Tests dashboard
+Accéder à /
+Vérifier que les 4 colonnes s'affichent
+Vérifier que "Émissions évitées" et "Réduction" affichent des valeurs cohérentes
+Tester responsive mobile → vérifier layout 2x2
+C. Tests calculs
+Avec volume = 1461.9 m³ et DBO5 = 570 mg/L, on doit obtenir :
+CO2e évité ≈ 6.58 t CO₂e
+Réduction ≈ 94%
+7. VALIDATION
+✅ Section qualité eaux brutes ajoutée dans config
+
+✅ Valeurs par défaut : DBO5 570, DCO 1250, MES 650 mg/L
+
+✅ Sauvegarde/lecture via API
+
+✅ Card dashboard modifiée avec 4 colonnes + emojis
+
+✅ Calculs CO2e implémentés (formules GIEC)
+
+✅ Auto-switch unité kg/tonnes
+
+✅ Responsive mobile 2x2
+
+✅ Texte "fosse standard" (pas "fosse septique")
+NOTES TECHNIQUES
+PRG CH4 = 28 (GIEC AR5 - 2014)
+MCF fosse standard = 0,5
+MCF Filtre Planté Vertical = 0,03
+Formule : CO2e = (Volume × DBO5_kg/m³ × 0.6 × (0.5 - 0.03)) × 28
+Réduction = ((0.5 - 0.03) / 0.5) × 100 = 94%
+
+---
+
+## ❓ QUESTIONS DE VALIDATION
+
+1. **Tu veux que je génère ce brief en fichier .txt pour copie facile ?**
+2. **DCO et MES** : Pour l'instant ils sont juste stockés, pas utilisés dans les calculs. Tu veux les exploiter plus tard ?
+3. **Export CSV** : Faut-il ajouter les colonnes DBO5/DCO/MES + CO2e dans l'export ?
+
+---
+
+## ✅ CHECKLIST POST-BUILD
+
+Une fois que Replit a terminé :
+
+- [ ] Aller sur `/admin` → vérifier affichage section "Qualité eaux brutes"
+- [ ] Modifier DBO5/DCO/MES → Enregistrer → Recharger → vérifier persistance
+- [ ] Aller sur `/` → vérifier nouvelle card avec 4 colonnes
+- [ ] Vérifier calculs CO2e cohérents (≈6.58 t pour 1461.9 m³)
+- [ ] Tester sur mobile → vérifier layout 2x2
+- [ ] Changer filtres date/device → vérifier recalcul CO2e
+- [ ] Vérifier console pour erreurs
