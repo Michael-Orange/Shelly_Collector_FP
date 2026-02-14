@@ -1,0 +1,205 @@
+📋 BRIEF POUR REPLIT
+═══════════════════════════════════════════════════════════════════════════════
+🎯 FIX MOBILE : Activer scroll horizontal du tableau des cycles
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 PROBLÈME
+Sur mobile, le tableau est trop large et on ne peut pas scroller horizontalement
+→ Les colonnes à droite (COURANT MOY, MIN/MAX AMPERES, MIN/MAX WATTS) sont invisibles
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ SOLUTION 1 : Wrapper avec overflow-x (RECOMMANDÉ)
+═══════════════════════════════════════════════════════════════════════════════
+
+Envelopper le <table> dans un conteneur scrollable :
+
+HTML :
+```html
+<div class="table-wrapper">
+    <table class="cycles-table">
+        <!-- Contenu existant du tableau -->
+    </table>
+</div>
+CSS :
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;  /* Smooth scroll iOS */
+    margin-bottom: 20px;
+}
+
+/* Assurer que le tableau ne se compresse pas */
+.cycles-table {
+    min-width: 1000px;  /* Ajuster selon largeur réelle */
+    width: 100%;
+}
+
+/* Indicateur visuel de scroll (optionnel mais recommandé) */
+.table-wrapper::after {
+    content: '→ Faites défiler →';
+    display: block;
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+    padding: 5px;
+    background: #f0f0f0;
+}
+
+/* Cacher l'indicateur sur desktop */
+@media (min-width: 768px) {
+    .table-wrapper::after {
+        display: none;
+    }
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ SOLUTION 2 : Version responsive avancée (OPTIONNEL)
+═══════════════════════════════════════════════════════════════════════════════
+Si tu veux optimiser l'expérience mobile, on peut :
+Afficher seulement les colonnes essentielles sur mobile
+Ajouter un bouton "Voir plus" pour les détails
+Colonnes prioritaires mobile :
+✅ CANAL
+✅ DATE
+✅ DURÉE
+✅ PUISSANCE MOY.
+⚠️ Les autres masquées (accessibles via modal/détails)
+CSS responsive :
+/* Sur mobile < 768px, masquer colonnes secondaires */
+@media (max-width: 767px) {
+    .cycles-table th:nth-child(n+6),  /* Colonnes après PUISSANCE MOY. */
+    .cycles-table td:nth-child(n+6) {
+        display: none;
+    }
+    
+    /* Ajouter icône "détails" dans dernière colonne visible */
+    .cycles-table td:nth-child(5)::after {
+        content: ' 🔍';
+        cursor: pointer;
+    }
+}
+Mais cette solution nécessite JS pour afficher les détails au clic.
+═══════════════════════════════════════════════════════════════════════════════
+💡 MA RECOMMANDATION : Solution 1 (Scroll horizontal)
+═══════════════════════════════════════════════════════════════════════════════
+POURQUOI ?
+✅ Simple à implémenter (wrapper + CSS)
+✅ Garde toutes les colonnes accessibles
+✅ Comportement standard attendu par les utilisateurs
+✅ Fonctionne sur tous les devices
+✅ Indicateur visuel "→ Faites défiler →" guide l'utilisateur
+═══════════════════════════════════════════════════════════════════════════════
+🔧 IMPLÉMENTATION EXACTE
+═══════════════════════════════════════════════════════════════════════════════
+ÉTAPE 1 : Identifier le <table> dans ton code dashboard
+Chercher :
+<table class="cycles-table">
+  <thead>
+    <tr>
+      <th>DEVICE</th>
+      <th>CANAL</th>
+      ...
+ÉTAPE 2 : Envelopper avec le wrapper
+AVANT :
+<table class="cycles-table">
+  ...
+</table>
+APRÈS :
+<div class="table-wrapper">
+    <table class="cycles-table">
+        ...
+    </table>
+</div>
+ÉTAPE 3 : Ajouter le CSS dans le <style> du dashboard
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.cycles-table {
+    min-width: 1000px;
+    width: 100%;
+    margin: 0;
+}
+
+/* Indicateur scroll mobile */
+@media (max-width: 767px) {
+    .table-wrapper::before {
+        content: '👉 Faites défiler pour voir toutes les colonnes';
+        display: block;
+        text-align: center;
+        font-size: 11px;
+        color: #666;
+        background: #f9f9f9;
+        padding: 8px;
+        border-bottom: 1px solid #ddd;
+    }
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+HTML :
+☐ <table> enveloppé dans <div class="table-wrapper">
+CSS :
+☐ .table-wrapper avec overflow-x: auto
+☐ -webkit-overflow-scrolling: touch (iOS)
+☐ .cycles-table avec min-width: 1000px
+☐ Indicateur "Faites défiler" visible sur mobile uniquement
+Tests mobile :
+☐ Ouvrir dashboard sur mobile (ou DevTools mobile)
+☐ Le tableau est scrollable horizontalement avec le doigt
+☐ L'indicateur "Faites défiler" est visible
+☐ Toutes les colonnes sont accessibles en scrollant
+☐ Le scroll est fluide (pas de lag)
+Tests desktop :
+☐ Le tableau reste normal (pas de scrollbar si inutile)
+☐ L'indicateur "Faites défiler" est caché
+☐ Aucune régression visuelle
+═══════════════════════════════════════════════════════════════════════════════
+📱 COMPORTEMENT ATTENDU (Mobile)
+═══════════════════════════════════════════════════════════════════════════════
+Vue initiale :
+┌────────────────────────────────┐
+│ 👉 Faites défiler...           │
+├────────────────────────────────┤
+│ DEVICE | CANAL | DATE | DEMARR │ (visible)
+│ ...                            │
+└────────────────────────────────┘
+Après scroll droite :
+┌────────────────────────────────┐
+│ 👉 Faites défiler...           │
+├────────────────────────────────┤
+│ ARRET | DURÉE | PUISSANCE | COU│ (visible)
+│ ...                            │
+└────────────────────────────────┘
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ POINTS D'ATTENTION
+═══════════════════════════════════════════════════════════════════════════════
+min-width du tableau
+→ Ajuster selon la largeur réelle de ton tableau
+→ Trop petit : colonnes compressées
+→ Trop grand : scrollbar inutile sur desktop
+Indicateur "Faites défiler"
+→ Optionnel mais fortement recommandé
+→ Guide l'utilisateur mobile qui ne sait pas qu'il peut scroller
+Touch scrolling iOS
+→ -webkit-overflow-scrolling: touch obligatoire pour fluidité
+Bordure du wrapper
+→ Délimite visuellement la zone scrollable
+
+---
+
+## 🎯 RÉSUMÉ
+
+**Problème** : Tableau trop large sur mobile, pas de scroll horizontal
+
+**Solution** : Wrapper `<div class="table-wrapper">` avec `overflow-x: auto`
+
+**Bonus** : Indicateur "👉 Faites défiler" pour guider l'utilisateur
+
+**Implémentation** : 3 lignes HTML + 10 lignes CSS
