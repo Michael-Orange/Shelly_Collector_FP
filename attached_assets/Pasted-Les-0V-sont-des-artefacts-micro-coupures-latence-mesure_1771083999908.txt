@@ -1,0 +1,96 @@
+Les 0V sont des artefacts (micro-coupures, latence mesure, etc.) qui polluent la moyenne.
+📋 BRIEF POUR REPLIT (Correction calcul voltage)
+═══════════════════════════════════════════════════════════════════════════════
+🎯 FIX : Calcul voltage moyen → Filtrer 0 et utiliser MÉDIANE
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 PROBLÈME
+Le calcul de voltage moyen est faussé par les valeurs à 0V
+→ Moyenne = 114V au lieu de 230V
+
+📌 SOLUTION
+1. Filtrer les valeurs aberrantes (< 180V ou > 260V)
+2. Utiliser la MÉDIANE au lieu de la MOYENNE
+
+═══════════════════════════════════════════════════════════════════════════════
+🔧 BACKEND - CYCLE DETECTOR
+═══════════════════════════════════════════════════════════════════════════════
+
+Dans detect_cycles() (ou équivalent) :
+
+AVANT (bugué) :
+```python
+# Calcul voltage moyen
+voltage_values = [row['voltage'] for row in data]
+avg_voltage = np.mean(voltage_values) if voltage_values else None
+APRÈS (corrigé) :
+# Filtrer valeurs aberrantes (exclure 0V et valeurs hors plage normale)
+voltage_values = [
+    v for v in [row['voltage'] for row in data]
+    if v is not None and 180 <= v <= 260
+]
+
+# Utiliser la MÉDIANE au lieu de la moyenne
+if voltage_values:
+    median_voltage = round(np.median(voltage_values), 1)
+else:
+    median_voltage = None
+
+cycle = {
+    ...
+    "voltage_v": median_voltage,  # ✅ MÉDIANE
+    ...
+}
+Explication :
+180V ≤ v ≤ 260V → Filtre les 0V, valeurs nulles, et aberrations
+np.median() → Résistant aux outliers
+round(..., 1) → 1 décimale
+═══════════════════════════════════════════════════════════════════════════════
+📊 EXEMPLE CALCUL
+═══════════════════════════════════════════════════════════════════════════════
+Données brutes voltage pendant le cycle :
+[230, 231, 0, 229, 0, 230, 0, 232, 228, 231, 0, 230]
+Après filtrage (180 ≤ v ≤ 260) :
+[230, 231, 229, 230, 232, 228, 231, 230]
+Tri pour médiane :
+[228, 229, 230, 230, 230, 231, 231, 232]
+Médiane (8 valeurs, nombre pair) :
+(230 + 230) / 2 = 230.0V ✅
+Si on avait gardé les 0 (MOYENNE) :
+(230 + 231 + 0 + 229 + 0 + 230 + 0 + 232 + 228 + 231 + 0 + 230) / 12 = 144.3V ❌
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+Backend :
+☐ Filtrage : 180 ≤ voltage ≤ 260
+☐ Calcul : np.median() au lieu de np.mean()
+☐ Format : round(..., 1)
+☐ Gestion cas vide : None si aucune valeur valide
+Tests :
+☐ Cycle 2 min → voltage_v ≈ 230V (pas 114V)
+☐ Cycle avec beaucoup de 0V → médiane toujours ~230V
+☐ Si toutes valeurs < 180V ou > 260V → None (affiche "-")
+Frontend :
+☐ Affichage inchangé (déjà prévu pour gérer None)
+☐ Format XXX.X V
+═══════════════════════════════════════════════════════════════════════════════
+💡 POURQUOI LA MÉDIANE ?
+═══════════════════════════════════════════════════════════════════════════════
+MOYENNE (sensible aux outliers) :
+[230, 230, 230, 230, 0, 0] → 153V ❌
+MÉDIANE (robuste) :
+[0, 0, 230, 230, 230, 230] → 230V ✅
+La médiane représente la "valeur typique" même si quelques mesures sont aberrantes.
+Cohérent avec ce qui a été fait pour puissance et intensité dans le bandeau stats.
+
+---
+
+## 🎯 RÉSUMÉ
+
+**Problème** : Moyenne = 114V à cause des 0V
+
+**Solution** :
+1. ✅ Filtrer : `180 <= voltage <= 260`
+2. ✅ MÉDIANE : `np.median(voltage_values)`
+
+**Résultat attendu** : ~230V ✅
