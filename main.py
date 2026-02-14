@@ -43,6 +43,11 @@ async def log_requests(request: Request, call_next):
     return response
 
 
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return "User-agent: *\nDisallow: /"
+
+
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "Shelly WS collector running (simple throttling)"

@@ -5,6 +5,7 @@ def render_admin() -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>FiltrePlante - Admin</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -226,6 +227,7 @@ def render_pumps_admin() -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>FiltrePlante - Modeles de pompes</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
