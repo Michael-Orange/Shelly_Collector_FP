@@ -1,0 +1,434 @@
+ BRIEF : Refonte Dashboard (Option C) + Type poste + Traitement eau
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 OBJECTIFS
+1. Bandeau statistiques compact style "carte de crédit" avec émojis (Option C)
+2. Date par défaut : fin = aujourd'hui, début = 30 jours avant
+3. Ajouter champ "Type de poste" dans config pompe
+4. Créer bandeau "Traitement et abattement" avec calcul eau traitée
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 1. BASE DE DONNÉES
+═══════════════════════════════════════════════════════════════════════════════
+
+MODIFICATION TABLE device_config
+---------------------------------
+Ajouter colonne pump_type (type de poste) :
+
+```sql
+ALTER TABLE device_config ADD COLUMN IF NOT EXISTS pump_type TEXT DEFAULT 'relevage';
+Valeurs possibles :
+'relevage' (Poste de relevage) ← défaut
+'sortie' (Poste de sortie)
+═══════════════════════════════════════════════════════════════════════════════
+🔧 2. BACKEND - CONFIG SERVICE (config_service.py)
+═══════════════════════════════════════════════════════════════════════════════
+Modifier update_device_config()
+cursor.execute("""
+    INSERT INTO device_config (device_id, channel, name, pump_model_id, hmt, flow_rate, pump_type)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT (device_id, channel) 
+    DO UPDATE SET name = $3, pump_model_id = $4, hmt = $5, flow_rate = $6, pump_type = $7
+""", (
+    data["device_id"],
+    ch["channel"],
+    ch["name"],
+    ch.get("pump_model_id"),
+    ch.get("hmt", 8),
+    float(ch["flow_rate"]) if ch.get("flow_rate") else None,
+    ch.get("pump_type", "relevage")  # NOUVEAU
+))
+Modifier get_devices_config()
+cursor.execute("""
+    SELECT 
+        dc.device_id, dc.channel, dc.name, dc.pump_model_id, 
+        dc.hmt, dc.flow_rate, dc.pump_type,
+        pm.name, pm.power_kw, pm.current_ampere, pm.flow_rate_hmt8
+    FROM device_config dc
+    LEFT JOIN pump_models pm ON dc.pump_model_id = pm.id
+""")
+
+channel_info = {
+    "channel": row[1],
+    "name": row[2],
+    "pump_model_id": row[3],
+    "hmt": row[4],
+    "flow_rate": row[5],
+    "pump_type": row[6],  # NOUVEAU
+}
+Nouvelle fonction : calculate_treated_water()
+def calculate_treated_water(conn, start_date, end_date):
+    """
+    Calcule le volume d'eau traitée (m³) pour les pompes de relevage.
+    Volume = somme(débit_effectif × durée_fonctionnement) pour pump_type='relevage'
+    """
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            pc.channel,
+            pc.duration_minutes,
+            dc.flow_rate,
+            dc.pump_type
+        FROM pump_cycles pc
+        JOIN device_config dc ON pc.channel = dc.channel
+        WHERE pc.start_time >= $1 AND pc.start_time <= $2
+          AND dc.pump_type = 'relevage'
+          AND dc.flow_rate IS NOT NULL
+    """, (start_date, end_date))
+    
+    total_m3 = 0
+    for row in cursor.fetchall():
+        duration_minutes = row[1]
+        flow_rate_m3h = row[2]
+        
+        duration_hours = duration_minutes / 60
+        volume_m3 = flow_rate_m3h * duration_hours
+        total_m3 += volume_m3
+    
+    return round(total_m3, 2)
+═══════════════════════════════════════════════════════════════════════════════
+🔧 3. BACKEND - ROUTES (api/routes.py)
+═══════════════════════════════════════════════════════════════════════════════
+Nouvelle route : GET /api/treatment-stats
+@app.get("/api/treatment-stats")
+async def get_treatment_stats(start_date: str, end_date: str):
+    conn = get_db_connection()
+    try:
+        treated_water = config_service.calculate_treated_water(conn, start_date, end_date)
+        
+        return {
+            "treated_water_m3": treated_water
+        }
+    finally:
+        conn.close()
+═══════════════════════════════════════════════════════════════════════════════
+🎨 4. FRONTEND - PAGE /admin (web/admin.py)
+═══════════════════════════════════════════════════════════════════════════════
+Ajouter champ Type de poste
+<!-- Entêtes colonnes -->
+<div style="display: flex; gap: 10px; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: bold;">
+    <div style="width: 100px;"></div>
+    <div style="flex: 1;">Nom</div>
+    <div style="flex: 2;">Modèle</div>
+    <div style="width: 140px;">Type de poste</div>  <!-- NOUVEAU -->
+    <div style="width: 90px;">HMT (m)</div>
+    <div style="width: 130px;">Débit effectif</div>
+</div>
+
+<!-- Ligne channel -->
+<div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+    <label style="width: 100px; font-weight: bold;">switch:0:</label>
+    
+    <input type="text" id="ch0-name" style="flex: 1; padding: 8px;">
+    
+    <select id="ch0-model" style="flex: 2; padding: 8px;">
+        <option value="">-- Aucun modèle --</option>
+    </select>
+    
+    <!-- NOUVEAU -->
+    <select id="ch0-type" style="width: 140px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="relevage">Poste de relevage</option>
+        <option value="sortie">Poste de sortie</option>
+    </select>
+    
+    <input type="number" id="ch0-hmt" style="width: 90px; padding: 8px;">
+    <input type="number" id="ch0-flow" style="width: 130px; padding: 8px;">
+</div>
+JavaScript : Inclure pump_type
+// Dans loadCurrentConfig()
+if (ch.pump_type) {
+    document.getElementById(`ch${idx}-type`).value = ch.pump_type;
+}
+
+// Dans saveDeviceConfig()
+const channels = [
+    {
+        channel: 'switch:0',
+        name: document.getElementById('ch0-name').value,
+        pump_model_id: document.getElementById('ch0-model').value || null,
+        pump_type: document.getElementById('ch0-type').value,  // NOUVEAU
+        hmt: document.getElementById('ch0-hmt').value,
+        flow_rate: document.getElementById('ch0-flow').value
+    },
+    // ... idem ch1, ch2
+];
+═══════════════════════════════════════════════════════════════════════════════
+🎨 5. FRONTEND - DASHBOARD (web/dashboard.py)
+═══════════════════════════════════════════════════════════════════════════════
+A. DATES PAR DÉFAUT
+<script>
+const today = new Date();
+const thirtyDaysAgo = new Date(today);
+thirtyDaysAgo.setDate(today.getDate() - 30);
+
+const formatDate = (date) => date.toISOString().split('T')[0];
+
+document.getElementById('start-date').value = formatDate(thirtyDaysAgo);
+document.getElementById('end-date').value = formatDate(today);
+
+// Charger au démarrage
+loadDashboardData();
+</script>
+B. BANDEAU STATISTIQUES COMPACT (OPTION C) ⭐
+REMPLACER les 8 cartes actuelles par ce bandeau unique :
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+}
+
+.stats-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.stats-separator {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    margin: 18px 0;
+}
+
+.stats-line {
+    display: flex;
+    align-items: center;
+    gap: 35px;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.stats-line > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stat-emoji {
+    font-size: 20px;
+}
+
+.stat-number {
+    font-weight: bold;
+    font-size: 18px;
+}
+</style>
+
+<!-- BANDEAU COMPACT OPTION C -->
+<div class="stats-card">
+    <h3>SYNTHÈSE DES CYCLES</h3>
+    <hr class="stats-separator">
+    
+    <div class="stats-line">
+        <div>
+            <span class="stat-emoji">📊</span>
+            <span><span class="stat-number" id="stat-total-cycles">-</span> cycles</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⚡</span>
+            <span><span class="stat-number" id="stat-running">-</span> en cours</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⏱️</span>
+            <span><span class="stat-number" id="stat-avg-duration">-</span></span>
+        </div>
+    </div>
+    
+    <div class="stats-line" style="margin-top: 15px;">
+        <div>
+            <span class="stat-emoji">💪</span>
+            <span><span class="stat-number" id="stat-avg-power">-</span> moy.</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">📈</span>
+            <span><span class="stat-number" id="stat-ampere-range">-</span></span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⚡</span>
+            <span><span class="stat-number" id="stat-watt-range">-</span></span>
+        </div>
+    </div>
+</div>
+C. BANDEAU TRAITEMENT & ABATTEMENT
+<style>
+.treatment-card {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(17, 153, 142, 0.4);
+}
+
+.treatment-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.treatment-stats {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+}
+
+.treatment-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.treatment-stat-label {
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+.treatment-stat-value {
+    font-size: 32px;
+    font-weight: bold;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.treatment-stat-unit {
+    font-size: 18px;
+    opacity: 0.85;
+}
+</style>
+
+<!-- BANDEAU TRAITEMENT -->
+<div class="treatment-card">
+    <h3>💧 TRAITEMENT & ABATTEMENT</h3>
+    
+    <div class="treatment-stats">
+        <div class="treatment-stat">
+            <div class="treatment-stat-label">Eau usée traitée (postes de relevage)</div>
+            <div class="treatment-stat-value">
+                <span id="treated-water-value">-</span>
+                <span class="treatment-stat-unit">m³</span>
+            </div>
+        </div>
+    </div>
+</div>
+D. JAVASCRIPT : Charger et afficher les données
+async function loadDashboardData() {
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    
+    // Charger cycles
+    const statsResponse = await fetch(`/api/pump-cycles?start_date=${startDate}&end_date=${endDate}`);
+    const cycles = await statsResponse.json();
+    
+    updateCompactStats(cycles);
+    
+    // Charger stats traitement
+    const treatmentResponse = await fetch(`/api/treatment-stats?start_date=${startDate}&end_date=${endDate}`);
+    const treatment = await treatmentResponse.json();
+    
+    document.getElementById('treated-water-value').textContent = treatment.treated_water_m3;
+}
+
+function updateCompactStats(cycles) {
+    // Total cycles
+    document.getElementById('stat-total-cycles').textContent = cycles.length;
+    
+    // En cours
+    const running = cycles.filter(c => !c.end_time).length;
+    document.getElementById('stat-running').textContent = running;
+    
+    // Durée moyenne
+    const completedCycles = cycles.filter(c => c.end_time);
+    const avgDuration = completedCycles.length > 0
+        ? Math.round(completedCycles.reduce((sum, c) => sum + c.duration_minutes, 0) / completedCycles.length)
+        : 0;
+    document.getElementById('stat-avg-duration').textContent = `${avgDuration} min`;
+    
+    // Puissance moyenne
+    const avgPower = completedCycles.length > 0
+        ? Math.round(completedCycles.reduce((sum, c) => sum + c.avg_power_w, 0) / completedCycles.length)
+        : 0;
+    document.getElementById('stat-avg-power').textContent = `${avgPower} W`;
+    
+    // Range ampères
+    const allAmperes = cycles.flatMap(c => [c.min_ampere, c.max_ampere]).filter(a => a);
+    const minA = allAmperes.length > 0 ? Math.min(...allAmperes).toFixed(1) : '-';
+    const maxA = allAmperes.length > 0 ? Math.max(...allAmperes).toFixed(1) : '-';
+    document.getElementById('stat-ampere-range').textContent = `${minA} - ${maxA} A`;
+    
+    // Range watts
+    const allWatts = cycles.flatMap(c => [c.min_watt, c.max_watt]).filter(w => w);
+    const minW = allWatts.length > 0 ? Math.round(Math.min(...allWatts)) : '-';
+    const maxW = allWatts.length > 0 ? Math.round(Math.max(...allWatts)) : '-';
+    document.getElementById('stat-watt-range').textContent = `${minW} - ${maxW} W`;
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+Base de données :
+☐ Colonne pump_type ajoutée à device_config
+Backend :
+☐ update_device_config() : gère pump_type
+☐ get_devices_config() : retourne pump_type
+☐ calculate_treated_water() créée
+☐ Route GET /api/treatment-stats créée
+Frontend /admin :
+☐ Champ select "Type de poste" ajouté
+☐ JavaScript : pump_type dans save/load
+Frontend /dashboard :
+☐ Dates par défaut : -30 jours → aujourd'hui
+☐ Bandeau violet style carte avec émojis (Option C)
+☐ Ligne 1 : 📊 cycles | ⚡ en cours | ⏱️ durée
+☐ Ligne 2 : 💪 puissance | 📈 ampères | ⚡ watts
+☐ Bandeau vert "Traitement & Abattement"
+☐ Affichage "Eau usée traitée (m³)"
+Tests :
+☐ Dashboard : Bandeau compact affiché avec émojis
+☐ Dashboard : Toutes les stats affichées correctement
+☐ Dashboard : "Eau usée traitée" calculée
+☐ Admin : Type de poste enregistré
+☐ Vérifier : Seules pompes "relevage" comptées dans eau traitée
+═══════════════════════════════════════════════════════════════════════════════
+📝 APERÇU VISUEL ATTENDU
+═══════════════════════════════════════════════════════════════════════════════
+┌──────────────────────────────────────────────────────────────┐
+│  SYNTHÈSE DES CYCLES                                         │
+│  ──────────────────────────────────────────────────────────  │
+│  📊 126 cycles    ⚡ 0 en cours    ⏱️ 31 min                │
+│  💪 778 W moy.    📈 0.4-10.2 A    ⚡ 66-2050.7 W           │
+└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  💧 TRAITEMENT & ABATTEMENT                                  │
+│                                                              │
+│  Eau usée traitée (postes de relevage)                      │
+│  200 m³                                                      │
+└──────────────────────────────────────────────────────────────┘
+
+---
+
+## 🎯 RÉSUMÉ
+
+### **Design Option C validé** :
+- ✅ Style "carte de crédit" compacte
+- ✅ Fond dégradé violet
+- ✅ Émojis pour chaque stat
+- ✅ 2 lignes horizontales
+- ✅ Toutes les infos conservées
+
+### **Autres modifications** :
+- ✅ Dates par défaut : -30 jours
+- ✅ Type de poste dans config
+- ✅ Bandeau vert "Traitement"
+- ✅ Calcul eau traitée (relevage only)

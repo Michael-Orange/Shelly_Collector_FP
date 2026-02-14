@@ -1,0 +1,484 @@
+BRIEF CORRIGÉ : Dashboard compact + Type poste + Traitement eau
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 OBJECTIFS
+1. Bandeau statistiques compact style "carte" avec émojis (Option C)
+2. Date par défaut : fin = aujourd'hui, début = 30 jours avant (au lieu de 45)
+3. Ajouter champ "Type de poste" OBLIGATOIRE dans config (relevage/sortie/autre)
+4. Calculer eau traitée directement dans /api/pump-cycles (pas d'endpoint séparé)
+
+⚠️ CORRECTIONS PAR RAPPORT AU BRIEF INITIAL
+--------------------------------------------
+- ❌ Pas de colonne `hmt` dans device_config (on ne l'ajoute PAS)
+- ❌ Pas de table `pump_cycles` (cycles calculés en mémoire par detect_cycles())
+- ✅ Calcul eau traitée intégré dans la réponse de /api/pump-cycles
+- ✅ pump_type devient OBLIGATOIRE avec validation
+- ✅ Ajout option "autre" en plus de "relevage" et "sortie"
+- ✅ Style élégant adapté au thème vert FiltrePlante (#2d8659)
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 1. BASE DE DONNÉES
+═══════════════════════════════════════════════════════════════════════════════
+
+MODIFICATION TABLE device_config
+---------------------------------
+Ajouter colonne pump_type (OBLIGATOIRE) :
+
+```sql
+ALTER TABLE device_config ADD COLUMN IF NOT EXISTS pump_type TEXT NOT NULL DEFAULT 'relevage';
+Valeurs possibles :
+'relevage' (Poste de relevage) ← défaut
+'sortie' (Poste de sortie)
+'autre' (Autre type)
+⚠️ Champ OBLIGATOIRE (NOT NULL) avec validation frontend et backend.
+═══════════════════════════════════════════════════════════════════════════════
+🔧 2. BACKEND - CONFIG SERVICE (config_service.py)
+═══════════════════════════════════════════════════════════════════════════════
+Modifier update_device_config()
+Ajouter pump_type avec VALIDATION OBLIGATOIRE :
+def update_device_config(conn, data):
+    cursor = conn.cursor()
+    
+    try:
+        # VALIDATION pump_type OBLIGATOIRE
+        for ch in data["channels"]:
+            if not ch.get("pump_type"):
+                raise ValueError(f"Type de poste obligatoire pour {ch['channel']}")
+            
+            if ch["pump_type"] not in ["relevage", "sortie", "autre"]:
+                raise ValueError(f"Type de poste invalide pour {ch['channel']}: {ch['pump_type']}")
+        
+        cursor.execute("BEGIN")
+        
+        for ch in data["channels"]:
+            cursor.execute("""
+                INSERT INTO device_config (device_id, channel, name, pump_model_id, flow_rate, pump_type)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (device_id, channel) 
+                DO UPDATE SET name = $3, pump_model_id = $4, flow_rate = $5, pump_type = $6
+            """, (
+                data["device_id"],
+                ch["channel"],
+                ch["name"],
+                ch.get("pump_model_id"),
+                float(ch["flow_rate"]) if ch.get("flow_rate") else None,
+                ch["pump_type"]  # OBLIGATOIRE
+            ))
+        
+        cursor.execute("COMMIT")
+        
+    except ValueError as e:
+        cursor.execute("ROLLBACK")
+        raise e
+⚠️ NE PAS inclure hmt (n'existe pas dans device_config)
+Modifier get_devices_config()
+cursor.execute("""
+    SELECT 
+        dc.device_id, dc.channel, dc.name, dc.pump_model_id, 
+        dc.flow_rate, dc.pump_type,
+        pm.name, pm.power_kw, pm.current_ampere, pm.flow_rate_hmt8
+    FROM device_config dc
+    LEFT JOIN pump_models pm ON dc.pump_model_id = pm.id
+""")
+
+channel_info = {
+    "channel": row[1],
+    "name": row[2],
+    "pump_model_id": row[3],
+    "flow_rate": row[4],
+    "pump_type": row[5]  # OBLIGATOIRE
+}
+═══════════════════════════════════════════════════════════════════════════════
+🔧 3. BACKEND - CYCLE DETECTION (intégrer calcul eau traitée)
+═══════════════════════════════════════════════════════════════════════════════
+Modifier detect_cycles() pour ajouter pump_type
+Dans la fonction qui détecte les cycles, ajouter l'info pump_type :
+def detect_cycles(conn, channel, start_date, end_date):
+    # Récupérer pump_type et flow_rate pour ce channel
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT pump_type, flow_rate 
+        FROM device_config 
+        WHERE channel = $1
+    """, (channel,))
+    
+    config = cursor.fetchone()
+    pump_type = config[0] if config else None
+    flow_rate = config[1] if config else None
+    
+    # ... ton code existant de détection de cycles
+    
+    # Pour chaque cycle détecté, ajouter pump_type et volume
+    cycle = {
+        "channel": channel,
+        "start_time": ...,
+        "end_time": ...,
+        "duration_minutes": ...,
+        # ... autres champs
+        "pump_type": pump_type,  # NOUVEAU
+        "volume_m3": calculate_volume(duration_minutes, flow_rate) if pump_type == "relevage" and flow_rate else None  # NOUVEAU
+    }
+    
+    return cycles
+
+def calculate_volume(duration_minutes, flow_rate_m3h):
+    """Calcule le volume en m³"""
+    if not flow_rate_m3h or not duration_minutes:
+        return None
+    return round((duration_minutes / 60) * flow_rate_m3h, 2)
+Modifier /api/pump-cycles pour inclure stats traitement
+@app.get("/api/pump-cycles")
+async def get_pump_cycles(start_date: str, end_date: str):
+    conn = get_db_connection()
+    try:
+        # Détecter cycles (code existant)
+        cycles = detect_all_cycles(conn, start_date, end_date)
+        
+        # NOUVEAU : Calculer eau traitée
+        treated_water_m3 = sum(
+            c.get("volume_m3", 0) 
+            for c in cycles 
+            if c.get("pump_type") == "relevage" and c.get("volume_m3")
+        )
+        
+        return {
+            "cycles": cycles,
+            "treatment_stats": {
+                "treated_water_m3": round(treated_water_m3, 2)
+            }
+        }
+    finally:
+        conn.close()
+═══════════════════════════════════════════════════════════════════════════════
+🎨 4. FRONTEND - PAGE /admin (web/admin.py)
+═══════════════════════════════════════════════════════════════════════════════
+Ajouter champ Type de poste OBLIGATOIRE
+<!-- Entêtes colonnes -->
+<div style="display: flex; gap: 10px; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: bold;">
+    <div style="width: 100px;"></div>
+    <div style="flex: 1;">Nom</div>
+    <div style="flex: 2;">Modèle</div>
+    <div style="width: 140px;">Type de poste *</div>  <!-- OBLIGATOIRE -->
+    <div style="width: 130px;">Débit effectif</div>
+</div>
+
+<!-- Ligne channel -->
+<div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+    <label style="width: 100px; font-weight: bold;">switch:0:</label>
+    
+    <input type="text" id="ch0-name" style="flex: 1; padding: 8px;">
+    
+    <select id="ch0-model" style="flex: 2; padding: 8px;">
+        <option value="">-- Aucun modèle --</option>
+    </select>
+    
+    <!-- Type de poste OBLIGATOIRE -->
+    <select id="ch0-type" required 
+            style="width: 140px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="relevage">Poste de relevage</option>
+        <option value="sortie">Poste de sortie</option>
+        <option value="autre">Autre</option>
+    </select>
+    
+    <input type="number" id="ch0-flow" style="width: 130px; padding: 8px;">
+</div>
+JavaScript : VALIDATION pump_type
+async function saveDeviceConfig(deviceId) {
+    const channels = [
+        {
+            channel: 'switch:0',
+            name: document.getElementById('ch0-name').value,
+            pump_model_id: document.getElementById('ch0-model').value || null,
+            pump_type: document.getElementById('ch0-type').value,  // OBLIGATOIRE
+            flow_rate: document.getElementById('ch0-flow').value
+        },
+        // ... ch1, ch2
+    ];
+    
+    // VALIDATION pump_type obligatoire
+    for (let i = 0; i < channels.length; i++) {
+        const ch = channels[i];
+        const channelName = ch.name || `switch:${i}`;
+        
+        if (!ch.pump_type) {
+            alert(`❌ Erreur : Type de poste obligatoire pour "${channelName}"`);
+            document.getElementById(`ch${i}-type`).focus();
+            return;
+        }
+        
+        // Validation flow_rate (existante)
+        if (ch.flow_rate !== '' && isNaN(parseFloat(ch.flow_rate))) {
+            alert(`❌ Erreur : Débit effectif invalide pour "${channelName}"`);
+            document.getElementById(`ch${i}-flow`).focus();
+            return;
+        }
+        
+        ch.flow_rate = ch.flow_rate === '' ? null : parseFloat(ch.flow_rate);
+    }
+    
+    // Envoi si validation OK
+    // ... reste du code
+}
+═══════════════════════════════════════════════════════════════════════════════
+🎨 5. FRONTEND - DASHBOARD (web/dashboard.py)
+═══════════════════════════════════════════════════════════════════════════════
+A. DATES PAR DÉFAUT : 30 JOURS
+const today = new Date();
+const thirtyDaysAgo = new Date(today);
+thirtyDaysAgo.setDate(today.getDate() - 30);  // 30 jours (pas 45)
+
+const formatDate = (date) => date.toISOString().split('T')[0];
+
+document.getElementById('start-date').value = formatDate(thirtyDaysAgo);
+document.getElementById('end-date').value = formatDate(today);
+
+loadDashboardData();
+B. BANDEAU STATISTIQUES (OPTION C - THÈME VERT FILTREPLANTE)
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #2d8659 0%, #1e5d3f 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(45, 134, 89, 0.4);
+}
+
+.stats-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.stats-separator {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    margin: 18px 0;
+}
+
+.stats-line {
+    display: flex;
+    align-items: center;
+    gap: 35px;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.stats-line > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stat-emoji {
+    font-size: 20px;
+}
+
+.stat-number {
+    font-weight: bold;
+    font-size: 18px;
+}
+</style>
+
+<!-- BANDEAU COMPACT THÈME VERT -->
+<div class="stats-card">
+    <h3>SYNTHÈSE DES CYCLES</h3>
+    <hr class="stats-separator">
+    
+    <div class="stats-line">
+        <div>
+            <span class="stat-emoji">📊</span>
+            <span><span class="stat-number" id="stat-total-cycles">-</span> cycles</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⚡</span>
+            <span><span class="stat-number" id="stat-running">-</span> en cours</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⏱️</span>
+            <span><span class="stat-number" id="stat-avg-duration">-</span></span>
+        </div>
+    </div>
+    
+    <div class="stats-line" style="margin-top: 15px;">
+        <div>
+            <span class="stat-emoji">💪</span>
+            <span><span class="stat-number" id="stat-avg-power">-</span> moy.</span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">📈</span>
+            <span><span class="stat-number" id="stat-ampere-range">-</span></span>
+        </div>
+        
+        <div>
+            <span class="stat-emoji">⚡</span>
+            <span><span class="stat-number" id="stat-watt-range">-</span></span>
+        </div>
+    </div>
+</div>
+C. BANDEAU TRAITEMENT (THÈME VERT COMPLÉMENTAIRE)
+<style>
+.treatment-card {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(17, 153, 142, 0.35);
+}
+
+.treatment-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.treatment-stat-value {
+    font-size: 36px;
+    font-weight: bold;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.treatment-stat-unit {
+    font-size: 20px;
+    opacity: 0.9;
+}
+
+.treatment-stat-label {
+    font-size: 14px;
+    opacity: 0.9;
+    margin-bottom: 10px;
+}
+</style>
+
+<!-- BANDEAU TRAITEMENT -->
+<div class="treatment-card">
+    <h3>💧 TRAITEMENT & ABATTEMENT</h3>
+    
+    <div>
+        <div class="treatment-stat-label">Eau usée traitée (postes de relevage uniquement)</div>
+        <div class="treatment-stat-value">
+            <span id="treated-water-value">-</span>
+            <span class="treatment-stat-unit">m³</span>
+        </div>
+    </div>
+</div>
+D. JAVASCRIPT : Charger données (UN SEUL APPEL)
+async function loadDashboardData() {
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    
+    // UN SEUL appel API (plus d'endpoint séparé)
+    const response = await fetch(`/api/pump-cycles?start_date=${startDate}&end_date=${endDate}`);
+    const data = await response.json();
+    
+    // Afficher stats cycles (code existant)
+    updateCompactStats(data.cycles);
+    
+    // NOUVEAU : Afficher eau traitée
+    document.getElementById('treated-water-value').textContent = data.treatment_stats.treated_water_m3;
+}
+
+function updateCompactStats(cycles) {
+    document.getElementById('stat-total-cycles').textContent = cycles.length;
+    
+    const running = cycles.filter(c => !c.end_time).length;
+    document.getElementById('stat-running').textContent = running;
+    
+    const completedCycles = cycles.filter(c => c.end_time);
+    
+    const avgDuration = completedCycles.length > 0
+        ? Math.round(completedCycles.reduce((sum, c) => sum + c.duration_minutes, 0) / completedCycles.length)
+        : 0;
+    document.getElementById('stat-avg-duration').textContent = `${avgDuration} min`;
+    
+    const avgPower = completedCycles.length > 0
+        ? Math.round(completedCycles.reduce((sum, c) => sum + c.avg_power_w, 0) / completedCycles.length)
+        : 0;
+    document.getElementById('stat-avg-power').textContent = `${avgPower} W`;
+    
+    const allAmperes = cycles.flatMap(c => [c.min_ampere, c.max_ampere]).filter(a => a);
+    const minA = allAmperes.length > 0 ? Math.min(...allAmperes).toFixed(1) : '-';
+    const maxA = allAmperes.length > 0 ? Math.max(...allAmperes).toFixed(1) : '-';
+    document.getElementById('stat-ampere-range').textContent = `${minA} - ${maxA} A`;
+    
+    const allWatts = cycles.flatMap(c => [c.min_watt, c.max_watt]).filter(w => w);
+    const minW = allWatts.length > 0 ? Math.round(Math.min(...allWatts)) : '-';
+    const maxW = allWatts.length > 0 ? Math.round(Math.max(...allWatts)) : '-';
+    document.getElementById('stat-watt-range').textContent = `${minW} - ${maxW} W`;
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+Base de données :
+☐ Colonne pump_type ajoutée (NOT NULL DEFAULT 'relevage')
+☐ ❌ PAS de colonne hmt
+Backend config :
+☐ update_device_config() : validation pump_type OBLIGATOIRE
+☐ update_device_config() : valeurs acceptées (relevage/sortie/autre)
+☐ get_devices_config() : retourne pump_type
+☐ ❌ PAS de colonne hmt dans les requêtes
+Backend cycles :
+☐ detect_cycles() : récupère pump_type et flow_rate de device_config
+☐ detect_cycles() : calcule volume_m3 pour chaque cycle (si relevage + flow_rate)
+☐ /api/pump-cycles : réponse inclut treatment_stats.treated_water_m3
+☐ ❌ PAS d'endpoint séparé /api/treatment-stats
+Frontend /admin :
+☐ Select "Type de poste" avec 3 options (relevage/sortie/autre)
+☐ Champ marqué OBLIGATOIRE (*)
+☐ Validation JavaScript avant envoi
+☐ ❌ PAS de champ hmt
+Frontend /dashboard :
+☐ Dates par défaut : -30 jours (pas 45)
+☐ Bandeau stats vert FiltrePlante (#2d8659)
+☐ Bandeau traitement vert complémentaire
+☐ UN SEUL appel /api/pump-cycles
+☐ Affichage treated_water_m3 depuis response.treatment_stats
+Tests :
+☐ Admin : Type de poste obligatoire → Erreur si vide
+☐ Admin : Sélectionner "relevage" → Enregistré
+☐ Admin : Sélectionner "autre" → Enregistré
+☐ Dashboard : Dates pré-remplies à 30 jours
+☐ Dashboard : Bandeaux verts élégants affichés
+☐ Dashboard : Eau traitée = somme volumes cycles "relevage" uniquement
+☐ Test calcul : PR1 (relevage, 22 m³/h, 2h) = 44 m³ ✅
+☐ Test calcul : PS (sortie, 15 m³/h, 1h) = 0 m³ (non compté) ✅
+═══════════════════════════════════════════════════════════════════════════════
+🎨 APERÇU VISUEL (THÈME VERT FILTREPLANTE)
+═══════════════════════════════════════════════════════════════════════════════
+┌──────────────────────────────────────────────────────────────┐
+│  SYNTHÈSE DES CYCLES                      [Vert foncé]       │
+│  ──────────────────────────────────────────────────────────  │
+│  📊 126 cycles    ⚡ 0 en cours    ⏱️ 31 min                │
+│  💪 778 W moy.    📈 0.4-10.2 A    ⚡ 66-2050.7 W           │
+└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  💧 TRAITEMENT & ABATTEMENT              [Vert eau]          │
+│                                                              │
+│  Eau usée traitée (postes de relevage uniquement)           │
+│  200 m³                                                      │
+└──────────────────────────────────────────────────────────────┘
+
+---
+
+## 🎯 CHANGEMENTS CLÉS PAR RAPPORT AU BRIEF INITIAL
+
+### **✅ Corrections** :
+1. ❌ **Supprimé** : colonne `hmt` (n'existe pas)
+2. ❌ **Supprimé** : table `pump_cycles` et jointure SQL
+3. ✅ **Ajouté** : calcul volume dans `detect_cycles()` en mémoire
+4. ✅ **Modifié** : réponse `/api/pump-cycles` inclut `treatment_stats`
+5. ✅ **Modifié** : `pump_type` devient **OBLIGATOIRE** avec validation
+6. ✅ **Ajouté** : option "autre" pour pump_type
+7. ✅ **Modifié** : thème vert FiltrePlante (#2d8659) au lieu de violet
+8. ✅ **Modifié** : 30 jours par défaut (au lieu de 45)
+9. ✅ **Optimisé** : un seul appel API (pas d'endpoint séparé)
