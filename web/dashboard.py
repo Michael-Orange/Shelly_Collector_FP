@@ -123,33 +123,98 @@ def render_dashboard() -> str:
             background: #f0f8f4;
         }
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
+        .stats-card {
+            background: linear-gradient(135deg, #2d8659 0%, #1e5d3f 100%);
             border-radius: 12px;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-            border-left: 4px solid #2d8659;
+            padding: 25px 30px;
+            margin-bottom: 1.5rem;
+            color: white;
+            box-shadow: 0 8px 25px rgba(45, 134, 89, 0.4);
         }
 
-        .stat-card .label {
-            font-size: 0.85rem;
-            color: #7f8c8d;
-            text-transform: uppercase;
+        .stats-card h3 {
+            margin: 0 0 18px 0;
+            font-size: 17px;
+            font-weight: 600;
+            opacity: 0.95;
             letter-spacing: 0.5px;
         }
 
-        .stat-card .value {
-            font-size: 2rem;
-            font-weight: 700;
-            color: #2d8659;
-            margin-top: 0.5rem;
+        .stats-separator {
+            border: 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.25);
+            margin: 16px 0;
+        }
+
+        .stats-line {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            font-size: 15px;
+            line-height: 1.6;
+            flex-wrap: wrap;
+        }
+
+        .stats-line > div {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-emoji {
+            font-size: 20px;
+        }
+
+        .stat-number {
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .treatment-card {
+            background: linear-gradient(135deg, #11998e 0%, #1e7a6d 100%);
+            border-radius: 12px;
+            padding: 25px 30px;
+            margin-bottom: 2rem;
+            color: white;
+            box-shadow: 0 8px 25px rgba(17, 153, 142, 0.4);
+        }
+
+        .treatment-card h3 {
+            margin: 0 0 18px 0;
+            font-size: 17px;
+            font-weight: 600;
+            opacity: 0.95;
+            letter-spacing: 0.5px;
+        }
+
+        .treatment-stats {
+            display: flex;
+            align-items: center;
+            gap: 40px;
+        }
+
+        .treatment-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .treatment-stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .treatment-stat-value {
+            font-size: 32px;
+            font-weight: bold;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+
+        .treatment-stat-unit {
+            font-size: 18px;
+            opacity: 0.85;
         }
 
         .table-container {
@@ -311,8 +376,12 @@ def render_dashboard() -> str:
                 padding: 0.7rem 0.5rem;
             }
 
-            .stat-card .value {
-                font-size: 1.5rem;
+            .stats-line {
+                gap: 15px;
+            }
+
+            .treatment-stat-value {
+                font-size: 24px;
             }
         }
     </style>
@@ -357,41 +426,50 @@ def render_dashboard() -> str:
             </div>
         </div>
 
-        <div class="stats">
-            <div class="stat-card">
-                <div class="label">Total cycles</div>
-                <div class="value" id="stat-total">-</div>
+        <div class="stats-card">
+            <h3>SYNTHESE DES CYCLES</h3>
+            <hr class="stats-separator">
+            <div class="stats-line">
+                <div>
+                    <span class="stat-emoji">&#x1F4CA;</span>
+                    <span><span class="stat-number" id="stat-total">-</span> cycles</span>
+                </div>
+                <div>
+                    <span class="stat-emoji">&#x26A1;</span>
+                    <span><span class="stat-number" id="stat-ongoing">-</span> en cours</span>
+                </div>
+                <div>
+                    <span class="stat-emoji">&#x23F1;</span>
+                    <span><span class="stat-number" id="stat-avg-duration">-</span></span>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="label">En cours</div>
-                <div class="value" id="stat-ongoing">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Duree moyenne</div>
-                <div class="value" id="stat-avg-duration">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Puissance moy.</div>
-                <div class="value" id="stat-avg-power">-</div>
+            <div class="stats-line" style="margin-top: 14px;">
+                <div>
+                    <span class="stat-emoji">&#x1F4AA;</span>
+                    <span><span class="stat-number" id="stat-avg-power">-</span> moy.</span>
+                </div>
+                <div>
+                    <span class="stat-emoji">&#x1F4C8;</span>
+                    <span><span class="stat-number" id="stat-ampere-range">-</span></span>
+                </div>
+                <div>
+                    <span class="stat-emoji">&#x26A1;</span>
+                    <span><span class="stat-number" id="stat-watt-range">-</span></span>
+                </div>
             </div>
         </div>
 
-        <div class="stats">
-            <div class="stat-card">
-                <div class="label">Max Amperes</div>
-                <div class="value" id="stat-max-current">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Min Amperes</div>
-                <div class="value" id="stat-min-current">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Max Watts</div>
-                <div class="value" id="stat-max-power">-</div>
-            </div>
-            <div class="stat-card">
-                <div class="label">Min Watts</div>
-                <div class="value" id="stat-min-power">-</div>
+        <div class="treatment-card">
+            <h3>&#x1F4A7; TRAITEMENT &amp; ABATTEMENT</h3>
+            <hr class="stats-separator">
+            <div class="treatment-stats">
+                <div class="treatment-stat">
+                    <div class="treatment-stat-label">Eau usee traitee (postes de relevage)</div>
+                    <div class="treatment-stat-value">
+                        <span id="treated-water-value">-</span>
+                        <span class="treatment-stat-unit">m&sup3;</span>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -434,7 +512,7 @@ def render_dashboard() -> str:
         document.addEventListener('DOMContentLoaded', () => {
             const today = new Date();
             const startDate = new Date(today);
-            startDate.setDate(today.getDate() - 45);
+            startDate.setDate(today.getDate() - 30);
 
             document.getElementById('start-date').valueAsDate = startDate;
             document.getElementById('end-date').valueAsDate = today;
@@ -649,15 +727,17 @@ def render_dashboard() -> str:
 
             if (currentData && currentData.stats) {
                 var s = currentData.stats;
-                document.getElementById('stat-max-current').textContent = s.max_current + ' A';
-                document.getElementById('stat-min-current').textContent = s.min_current + ' A';
-                document.getElementById('stat-max-power').textContent = s.max_power + ' W';
-                document.getElementById('stat-min-power').textContent = s.min_power + ' W';
+                document.getElementById('stat-ampere-range').textContent = s.min_current + ' - ' + s.max_current + ' A';
+                document.getElementById('stat-watt-range').textContent = s.min_power + ' - ' + s.max_power + ' W';
             } else {
-                document.getElementById('stat-max-current').textContent = '-';
-                document.getElementById('stat-min-current').textContent = '-';
-                document.getElementById('stat-max-power').textContent = '-';
-                document.getElementById('stat-min-power').textContent = '-';
+                document.getElementById('stat-ampere-range').textContent = '-';
+                document.getElementById('stat-watt-range').textContent = '-';
+            }
+
+            if (currentData && currentData.treatment_stats) {
+                document.getElementById('treated-water-value').textContent = currentData.treatment_stats.treated_water_m3;
+            } else {
+                document.getElementById('treated-water-value').textContent = '-';
             }
         }
 

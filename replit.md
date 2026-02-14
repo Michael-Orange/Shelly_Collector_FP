@@ -4,7 +4,17 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-14 (Latest)**: Ajout champ Débit effectif (flow_rate) :
+**2026-02-14 (Latest)**: Refonte dashboard compact + Type de poste + Traitement eau :
+- **New**: `pump_type` TEXT NOT NULL DEFAULT 'relevage' column added to `device_config` (relevage/sortie/autre)
+- **New**: Dashboard bandeau compact "SYNTHESE DES CYCLES" (Option C) — 6 stats avec emojis sur 2 lignes
+- **New**: Dashboard bandeau "TRAITEMENT & ABATTEMENT" — volume eau traitée en m³ (vert teal)
+- **New**: API `/api/pump-cycles` returns `treatment_stats.treated_water_m3` + `pump_type`/`volume_m3` per cycle
+- **Modified**: `/admin` page — new "Type de poste" dropdown per channel (Relevage/Sortie/Autre)
+- **Modified**: Dashboard dates par défaut changées de 45 → 30 jours
+- **Modified**: `DEFAULT_DAYS_HISTORY` = 30 in config.py
+- **Modified**: Stats ampères et watts affichées en range (min - max) au lieu de 4 cartes séparées
+
+**2026-02-14**: Ajout champ Débit effectif (flow_rate) :
 - **New**: `flow_rate` REAL NULL column added to `device_config`
 - **Modified**: `/admin` page — new "Débit (m3/h)" column per channel with validation
 - **Modified**: `upsert_device_with_channels()` — saves/validates flow_rate (positive number)
@@ -124,9 +134,10 @@ shelly_collector_fp/
 
 - **Cycle detection**: Gap >= 4 minutes between measurements = pump stopped
 - **Minimum cycle**: Cycles < 2 minutes filtered out (noise)
-- **Default view**: Last 45 days
+- **Default view**: Last 30 days
 - **Filters**: Device ID, Channel (switch:0/1/2), date range
-- **Stats cards**: Total cycles, ongoing, avg duration, avg power
+- **Stats banner**: Compact "SYNTHESE DES CYCLES" with emojis (total, ongoing, avg duration, avg power, ampere range, watt range)
+- **Treatment banner**: "TRAITEMENT & ABATTEMENT" showing treated water volume in m³ for relevage pumps
 - **Export CSV**: French format (semicolon separator)
 - **Ongoing cycles**: Marked as "En cours" if last measurement < 3 min ago
 - **Style**: FiltrePlante green theme (#2d8659)
@@ -204,6 +215,7 @@ CREATE TABLE pump_models (
 
 -- device_config also has: pump_model_id INTEGER REFERENCES pump_models(id)
 -- device_config also has: flow_rate REAL NULL
+-- device_config also has: pump_type TEXT NOT NULL DEFAULT 'relevage' (relevage/sortie/autre)
 ```
 
 ## Deployment

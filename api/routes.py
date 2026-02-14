@@ -93,6 +93,8 @@ async def get_pump_cycles(
             "min_power": float('inf')
         }
 
+        treated_water_m3 = 0.0
+
         for cycle in cycles:
             pw = cycle.get('avg_power_w')
             if pw is not None:
@@ -102,6 +104,24 @@ async def get_pump_cycles(
             if ca is not None:
                 stats['max_current'] = max(stats['max_current'], ca)
                 stats['min_current'] = min(stats['min_current'], ca)
+
+            dev = cycle.get('device_id')
+            ch = cycle.get('channel')
+            ch_config = None
+            if dev and ch and dev in configs and ch in configs[dev].get('channels', {}):
+                ch_config = configs[dev]['channels'][ch]
+
+            pump_type = ch_config.get('pump_type', 'relevage') if ch_config else 'relevage'
+            flow_rate = ch_config.get('flow_rate') if ch_config else None
+            cycle['pump_type'] = pump_type
+
+            if pump_type == 'relevage' and flow_rate and cycle.get('duration_minutes'):
+                volume = round((cycle['duration_minutes'] / 60) * flow_rate, 2)
+                cycle['volume_m3'] = volume
+                if not cycle.get('is_ongoing'):
+                    treated_water_m3 += volume
+            else:
+                cycle['volume_m3'] = None
 
         if stats['min_current'] == float('inf'):
             stats['min_current'] = 0
@@ -114,6 +134,9 @@ async def get_pump_cycles(
             "device_ids": found_device_ids,
             "configs": configs,
             "stats": stats,
+            "treatment_stats": {
+                "treated_water_m3": round(treated_water_m3, 2)
+            },
             "filters": {
                 "device_id": device_id,
                 "channel": channel,

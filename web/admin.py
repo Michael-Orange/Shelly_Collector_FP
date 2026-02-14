@@ -37,6 +37,7 @@ def render_admin() -> str:
         .col-headers .col-label { min-width: 120px; }
         .col-headers .col-name { flex: 1; }
         .col-headers .col-model { flex: 2; }
+        .col-headers .col-type { width: 150px; }
         .col-headers .col-flow { width: 120px; text-align: center; }
         @media (max-width: 768px) {
             .container { padding: 0 1rem; }
@@ -121,6 +122,7 @@ def render_admin() -> str:
                             '<div class="col-label"></div>' +
                             '<div class="col-name">Nom</div>' +
                             '<div class="col-model">Modele</div>' +
+                            '<div class="col-type">Type de poste</div>' +
                             '<div class="col-flow">Debit (m3/h)</div>' +
                         '</div>' +
                         device.channels.map(function(ch) {
@@ -129,12 +131,19 @@ def render_admin() -> str:
                             var chName = escapeHtml(chConfig.channel_name || channelNames[ch] || '');
                             var pumpModelId = chConfig.pump_model_id || null;
                             var flowRate = (chConfig.flow_rate != null && !isNaN(chConfig.flow_rate)) ? parseFloat(Number(chConfig.flow_rate).toFixed(2)) : '';
+                            var pumpType = chConfig.pump_type || 'relevage';
                             var selectId = 'pm-' + safeId + '-' + safeCh;
+                            var typeId = 'pt-' + safeId + '-' + safeCh;
 
                             return '<div class="input-row">' +
                                 '<label>' + safeCh + ':</label>' +
                                 '<input id="cn-' + safeId + '-' + safeCh + '" value="' + chName + '" placeholder="Ex: Pompe PR" style="flex:1;">' +
                                 buildPumpSelect(selectId, pumpModelId) +
+                                '<select id="' + typeId + '" style="width:150px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;background:white;">' +
+                                    '<option value="relevage"' + (pumpType === 'relevage' ? ' selected' : '') + '>Relevage</option>' +
+                                    '<option value="sortie"' + (pumpType === 'sortie' ? ' selected' : '') + '>Sortie</option>' +
+                                    '<option value="autre"' + (pumpType === 'autre' ? ' selected' : '') + '>Autre</option>' +
+                                '</select>' +
                                 '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="Debit" title="Debit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
                             '</div>';
                         }).join('') +
@@ -154,8 +163,10 @@ def render_admin() -> str:
                 var nameInput = document.getElementById('cn-' + deviceId + '-' + ch);
                 var modelSelect = document.getElementById('pm-' + deviceId + '-' + ch);
                 var flowInput = document.getElementById('fr-' + deviceId + '-' + ch);
+                var typeSelect = document.getElementById('pt-' + deviceId + '-' + ch);
                 var pumpModelId = modelSelect ? modelSelect.value : '';
                 var flowVal = flowInput ? flowInput.value.trim() : '';
+                var pumpType = typeSelect ? typeSelect.value : 'relevage';
 
                 if (flowVal !== '' && (isNaN(parseFloat(flowVal)) || parseFloat(flowVal) < 0)) {
                     flowInput.classList.add('invalid-input');
@@ -169,7 +180,8 @@ def render_admin() -> str:
                     channel: ch,
                     name: nameInput ? nameInput.value.trim() : '',
                     pump_model_id: pumpModelId ? parseInt(pumpModelId) : null,
-                    flow_rate: flowVal !== '' ? parseFloat(flowVal) : null
+                    flow_rate: flowVal !== '' ? parseFloat(flowVal) : null,
+                    pump_type: pumpType
                 });
             }
 
