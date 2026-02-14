@@ -34,6 +34,32 @@ async def create_tables(pool: asyncpg.Pool):
             CREATE INDEX IF NOT EXISTS idx_device_config_device 
             ON device_config(device_id)
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pump_models (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                power_kw REAL NOT NULL,
+                current_ampere REAL NOT NULL,
+                flow_rate_hmt8 REAL NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            INSERT INTO pump_models (id, name, power_kw, current_ampere, flow_rate_hmt8)
+            VALUES (1, 'Pedrollo VXM 10/35', 0.75, 4.8, 18.0)
+            ON CONFLICT (id) DO NOTHING
+        """)
+        await conn.execute("""
+            INSERT INTO pump_models (id, name, power_kw, current_ampere, flow_rate_hmt8)
+            VALUES (2, 'Pedrollo DM/8', 0.55, 3.2, NULL)
+            ON CONFLICT (id) DO NOTHING
+        """)
+        await conn.execute("""
+            SELECT setval('pump_models_id_seq', GREATEST((SELECT MAX(id) FROM pump_models), 2))
+        """)
+        await conn.execute("""
+            ALTER TABLE device_config ADD COLUMN IF NOT EXISTS pump_model_id INTEGER REFERENCES pump_models(id)
+        """)
     print("✅ Tables verified/created", flush=True)
 
 

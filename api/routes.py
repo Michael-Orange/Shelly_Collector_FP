@@ -8,7 +8,12 @@ from services.config_service import (
     get_configs_map,
     upsert_device_name,
     upsert_channel_name,
-    delete_device_config
+    delete_device_config,
+    get_all_pump_models,
+    create_pump_model,
+    update_pump_model,
+    delete_pump_model,
+    upsert_device_with_channels
 )
 
 router = APIRouter(prefix="/api")
@@ -135,9 +140,11 @@ async def get_devices_config(request: Request):
             did = device['device_id']
             if did in configs:
                 device['device_name'] = configs[did]['device_name']
-                device['channel_names'] = configs[did]['channels']
+                device['channel_configs'] = configs[did]['channels']
+                device['channel_names'] = {ch: info['channel_name'] for ch, info in configs[did]['channels'].items()}
             else:
                 device['device_name'] = None
+                device['channel_configs'] = {}
                 device['channel_names'] = {}
 
         return {"devices": devices}
@@ -158,8 +165,14 @@ async def update_device_name(request: Request):
         if not did:
             raise HTTPException(400, "device_id required")
 
-        await upsert_device_name(db_pool, did, name)
-        print(f"✅ Device name updated: {did} -> {name}", flush=True)
+        if "channels" in body:
+            channels = body["channels"]
+            await upsert_device_with_channels(db_pool, did, name, channels)
+            print(f"✅ Device saved with channels: {did} -> {name}", flush=True)
+        else:
+            await upsert_device_name(db_pool, did, name)
+            print(f"✅ Device name updated: {did} -> {name}", flush=True)
+
         return {"success": True}
     except HTTPException:
         raise
@@ -201,4 +214,81 @@ async def delete_device(request: Request, device_id: str):
         return {"success": True}
     except Exception as e:
         print(f"❌ Error deleting device: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/config/pump-models")
+async def get_pump_models(request: Request):
+    db_pool = request.app.state.db_pool
+
+    try:
+        models = await get_all_pump_models(db_pool)
+        return models
+    except Exception as e:
+        print(f"❌ Error fetching pump models: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/pump-model")
+async def create_pump_model_route(request: Request):
+    db_pool = request.app.state.db_pool
+
+    try:
+        body = await request.json()
+        name = body.get("name")
+        power_kw = body.get("power_kw")
+        current_ampere = body.get("current_ampere")
+        flow_rate_hmt8 = body.get("flow_rate_hmt8")
+
+        if not name or power_kw is None or current_ampere is None:
+            raise HTTPException(400, "name, power_kw and current_ampere required")
+
+        new_id = await create_pump_model(db_pool, name, float(power_kw), float(current_ampere), float(flow_rate_hmt8) if flow_rate_hmt8 is not None else None)
+        print(f"✅ Pump model created: {name} (id={new_id})", flush=True)
+        return {"success": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating pump model: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/config/pump-model/{pump_id}")
+async def update_pump_model_route(request: Request, pump_id: int):
+    db_pool = request.app.state.db_pool
+
+    try:
+        body = await request.json()
+        name = body.get("name")
+        power_kw = body.get("power_kw")
+        current_ampere = body.get("current_ampere")
+        flow_rate_hmt8 = body.get("flow_rate_hmt8")
+
+        if not name or power_kw is None or current_ampere is None:
+            raise HTTPException(400, "name, power_kw and current_ampere required")
+
+        await update_pump_model(db_pool, pump_id, name, float(power_kw), float(current_ampere), float(flow_rate_hmt8) if flow_rate_hmt8 is not None else None)
+        print(f"✅ Pump model updated: {name} (id={pump_id})", flush=True)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating pump model: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/config/pump-model/{pump_id}")
+async def delete_pump_model_route(request: Request, pump_id: int):
+    db_pool = request.app.state.db_pool
+
+    try:
+        result = await delete_pump_model(db_pool, pump_id)
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        print(f"✅ Pump model deleted: id={pump_id}", flush=True)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error deleting pump model: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))

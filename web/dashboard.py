@@ -452,7 +452,11 @@ def render_dashboard() -> str:
         function getChannelName(deviceId, channel) {
             var configs = (currentData && currentData.configs) || {};
             var cfg = configs[deviceId];
-            if (cfg && cfg.channels && cfg.channels[channel]) return cfg.channels[channel];
+            if (cfg && cfg.channels && cfg.channels[channel]) {
+                var chInfo = cfg.channels[channel];
+                if (typeof chInfo === 'object' && chInfo.channel_name) return chInfo.channel_name;
+                if (typeof chInfo === 'string') return chInfo;
+            }
             return channel;
         }
 

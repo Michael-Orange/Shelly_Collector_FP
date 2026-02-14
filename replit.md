@@ -4,7 +4,18 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-14 (Latest)**: Dashboard KPI min/max + tri colonnes :
+**2026-02-14 (Latest)**: Pump models management + admin enhancements:
+- **New**: `pump_models` table — catalogue of pump models (name, power_kw, current_ampere, flow_rate_hmt8)
+- **New**: 2 initial Pedrollo models seeded at startup (VXM 10/35, DM/8)
+- **New**: `pump_model_id` column added to `device_config` (FK to pump_models)
+- **New**: CRUD API for pump models: GET/POST/PUT/DELETE `/api/config/pump-model*`
+- **New**: Page `/admin/pumps` — full CRUD for pump models (create, edit, delete with protection)
+- **Modified**: `/admin` page — per-channel pump model dropdown + single "Enregistrer tout" button (transaction)
+- **Modified**: `POST /api/config/device` — accepts `channels` array with `pump_model_id` (backward compatible)
+- **Modified**: `GET /api/config/devices` — returns `channel_configs` with pump_model info (LEFT JOIN)
+- **Gap threshold**: Changed from 3 to 4 minutes for cycle detection
+
+**2026-02-14**: Dashboard KPI min/max + tri colonnes :
 - **Cycle detector**: Calcule `avg_current_a` par cycle (requête SQL inclut `current_a`)
 - **API**: `/api/pump-cycles` retourne `stats` (max_current, min_current, max_power, min_power)
 - **Dashboard**: 4 nouveaux KPI (Max/Min Ampères, Max/Min Watts) — total 8 cartes
@@ -66,14 +77,14 @@ shelly_collector_fp/
 │   ├── __init__.py
 │   ├── database.py            # DB pool (create/close), create_tables(), should_write(), insert_power_log()
 │   ├── cycle_detector.py      # detect_cycles() - gap-based ON/OFF cycle detection
-│   └── config_service.py      # CRUD for device/channel custom names (device_config table)
+│   └── config_service.py      # CRUD for device/channel names + pump models (device_config, pump_models)
 ├── api/
 │   ├── __init__.py
 │   └── routes.py              # /api/pump-cycles + /api/config/* endpoints
 ├── web/
 │   ├── __init__.py
 │   ├── dashboard.py           # render_dashboard() - Full HTML/CSS/JS page
-│   └── admin.py               # render_admin() - Config page for device/channel names
+│   └── admin.py               # render_admin() + render_pumps_admin() - Config pages
 ├── models/
 │   ├── __init__.py
 │   └── schemas.py             # Pydantic PowerLogData model
@@ -90,14 +101,19 @@ shelly_collector_fp/
 | `/dashboard` | GET | Web dashboard (HTML) |
 | `/admin` | GET | Admin config page (HTML) |
 | `/api/pump-cycles` | GET | Cycle data API (JSON) |
-| `/api/config/devices` | GET | List devices with custom names |
-| `/api/config/device` | POST | Update device name |
+| `/admin/pumps` | GET | Pump models management page (HTML) |
+| `/api/config/devices` | GET | List devices with custom names + pump model info |
+| `/api/config/device` | POST | Update device + channels config (transaction) |
 | `/api/config/channel` | POST | Update channel name |
 | `/api/config/device/{id}` | DELETE | Delete device config |
+| `/api/config/pump-models` | GET | List all pump models |
+| `/api/config/pump-model` | POST | Create pump model |
+| `/api/config/pump-model/{id}` | PUT | Update pump model |
+| `/api/config/pump-model/{id}` | DELETE | Delete pump model (protected if in use) |
 
 ## Dashboard Features
 
-- **Cycle detection**: Gap >= 3 minutes between measurements = pump stopped
+- **Cycle detection**: Gap >= 4 minutes between measurements = pump stopped
 - **Minimum cycle**: Cycles < 2 minutes filtered out (noise)
 - **Default view**: Last 45 days
 - **Filters**: Device ID, Channel (switch:0/1/2), date range
@@ -167,6 +183,17 @@ CREATE TABLE power_logs (
 
 CREATE INDEX idx_power_logs_timestamp ON power_logs(timestamp);
 CREATE INDEX idx_power_logs_device_channel ON power_logs(device_id, channel);
+
+CREATE TABLE pump_models (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    power_kw REAL NOT NULL,
+    current_ampere REAL NOT NULL,
+    flow_rate_hmt8 REAL NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- device_config also has: pump_model_id INTEGER REFERENCES pump_models(id)
 ```
 
 ## Deployment

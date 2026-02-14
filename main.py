@@ -8,7 +8,7 @@ import config
 from services.database import create_db_pool, close_db_pool, create_tables, should_write, insert_power_log
 from api.routes import router as api_router
 from web.dashboard import render_dashboard
-from web.admin import render_admin
+from web.admin import render_admin, render_pumps_admin
 
 app = FastAPI()
 app.include_router(api_router)
@@ -56,6 +56,11 @@ async def dashboard():
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
     return render_admin()
+
+
+@app.get("/admin/pumps", response_class=HTMLResponse)
+async def admin_pumps_page():
+    return render_pumps_admin()
 
 
 @app.websocket("/ws")

@@ -23,8 +23,12 @@ async def get_all_devices_from_logs(pool: asyncpg.Pool) -> List[Dict]:
 async def get_configs_map(pool: asyncpg.Pool) -> Dict:
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT device_id, device_name, channel, channel_name
-            FROM device_config
+            SELECT dc.device_id, dc.device_name, dc.channel, dc.channel_name,
+                   dc.pump_model_id,
+                   pm.id as pm_id, pm.name as pm_name, pm.power_kw as pm_power_kw,
+                   pm.current_ampere as pm_current_ampere, pm.flow_rate_hmt8 as pm_flow_rate_hmt8
+            FROM device_config dc
+            LEFT JOIN pump_models pm ON dc.pump_model_id = pm.id
         """)
 
     configs = {}
@@ -36,7 +40,20 @@ async def get_configs_map(pool: asyncpg.Pool) -> Dict:
                 'channels': {}
             }
         if row['channel']:
-            configs[device_id]['channels'][row['channel']] = row['channel_name']
+            pump_model = None
+            if row['pm_id'] is not None:
+                pump_model = {
+                    'id': row['pm_id'],
+                    'name': row['pm_name'],
+                    'power_kw': row['pm_power_kw'],
+                    'current_ampere': row['pm_current_ampere'],
+                    'flow_rate_hmt8': row['pm_flow_rate_hmt8']
+                }
+            configs[device_id]['channels'][row['channel']] = {
+                'channel_name': row['channel_name'],
+                'pump_model_id': row['pump_model_id'],
+                'pump_model': pump_model
+            }
 
     return configs
 
@@ -69,3 +86,59 @@ async def upsert_channel_name(pool: asyncpg.Pool, device_id: str, channel: str, 
 async def delete_device_config(pool: asyncpg.Pool, device_id: str):
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM device_config WHERE device_id = $1", device_id)
+
+
+async def get_all_pump_models(pool: asyncpg.Pool) -> List[Dict]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, power_kw, current_ampere, flow_rate_hmt8
+            FROM pump_models
+            ORDER BY name
+        """)
+    return [dict(row) for row in rows]
+
+
+async def create_pump_model(pool: asyncpg.Pool, name: str, power_kw: float, current_ampere: float, flow_rate_hmt8: Optional[float] = None) -> int:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO pump_models (name, power_kw, current_ampere, flow_rate_hmt8)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+        """, name, power_kw, current_ampere, flow_rate_hmt8)
+    return row['id']
+
+
+async def update_pump_model(pool: asyncpg.Pool, pump_id: int, name: str, power_kw: float, current_ampere: float, flow_rate_hmt8: Optional[float] = None):
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE pump_models
+            SET name = $2, power_kw = $3, current_ampere = $4, flow_rate_hmt8 = $5
+            WHERE id = $1
+        """, pump_id, name, power_kw, current_ampere, flow_rate_hmt8)
+
+
+async def delete_pump_model(pool: asyncpg.Pool, pump_id: int) -> dict:
+    async with pool.acquire() as conn:
+        count = await conn.fetchval("""
+            SELECT COUNT(*) FROM device_config WHERE pump_model_id = $1
+        """, pump_id)
+        if count > 0:
+            return {"success": False, "error": f"Cannot delete: pump model is used by {count} channel(s)"}
+        await conn.execute("DELETE FROM pump_models WHERE id = $1", pump_id)
+        return {"success": True}
+
+
+async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device_name: Optional[str], channels: List[Dict]):
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("""
+                UPDATE device_config SET device_name = $2, updated_at = NOW()
+                WHERE device_id = $1
+            """, device_id, device_name)
+            for ch in channels:
+                await conn.execute("""
+                    INSERT INTO device_config (device_id, device_name, channel, channel_name, pump_model_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (device_id, channel)
+                    DO UPDATE SET channel_name = $4, pump_model_id = $5, device_name = $2, updated_at = NOW()
+                """, device_id, device_name, ch['channel'], ch.get('name'), ch.get('pump_model_id'))
