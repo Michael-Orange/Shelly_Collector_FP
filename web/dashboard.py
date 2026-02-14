@@ -445,8 +445,8 @@ def render_dashboard() -> str:
 </head>
 <body>
     <div class="header">
-        <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
-        <p>Suivi en temps r&#233;el des cycles de d&#233;marrage et d'arr&#234;t | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
+        <h1><span>🌱</span> FiltrePlante - Suivi des Stations</h1>
+        <p>Analyse des cycles de pompage et impact environnemental | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
     </div>
 
     <div class="container">
