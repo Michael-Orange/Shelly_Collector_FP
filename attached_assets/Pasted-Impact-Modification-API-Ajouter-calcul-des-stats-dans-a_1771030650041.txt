@@ -1,0 +1,297 @@
+Impact :
+Modification API : Ajouter calcul des stats dans /api/pump-cycles
+Dashboard : 4 nouveaux KPI + tri JavaScript sur le tableau
+Pas de nouvelle table DB → Simple calcul sur les données existantes
+📋 BRIEF POUR REPLIT
+Copie-colle ce bloc dans Replit Agent :
+CONTEXTE
+========
+Application Shelly_Collector_FP avec dashboard de monitoring des pompes.
+Besoin : Enrichir le dashboard avec des indicateurs min/max et permettre le tri des colonnes.
+
+OBJECTIF
+========
+1. Ajouter 4 indicateurs statistiques sur la période filtrée :
+   - Max Ampères (current_a)
+   - Min Ampères (current_a)
+   - Max Watts (apower_w)
+   - Min Watts (apower_w)
+
+2. Permettre le tri des colonnes du tableau en cliquant sur les en-têtes :
+   - 1er clic → Tri décroissant
+   - 2e clic → Tri croissant
+   - 3e clic → Retour à l'ordre chronologique
+
+SPÉCIFICATIONS
+===============
+
+PARTIE 1 : API - CALCUL DES STATS MIN/MAX
+------------------------------------------
+
+Modifier api/routes.py dans la fonction get_pump_cycles() :
+
+Après avoir calculé les cycles, ajouter le calcul des stats :
+
+# Calculer les stats min/max sur les cycles
+stats = {
+    "max_current": 0,
+    "min_current": float('inf'),
+    "max_power": 0,
+    "min_power": float('inf')
+}
+
+for cycle in cycles:
+    if cycle['avg_current'] is not None:
+        stats['max_current'] = max(stats['max_current'], cycle['avg_current'])
+        stats['min_current'] = min(stats['min_current'], cycle['avg_current'])
+    
+    if cycle['avg_power'] is not None:
+        stats['max_power'] = max(stats['max_power'], cycle['avg_power'])
+        stats['min_power'] = min(stats['min_power'], cycle['avg_power'])
+
+# Si aucune donnée, mettre à 0
+if stats['min_current'] == float('inf'):
+    stats['min_current'] = 0
+if stats['min_power'] == float('inf'):
+    stats['min_power'] = 0
+
+# Arrondir à 1 décimale
+stats['max_current'] = round(stats['max_current'], 1)
+stats['min_current'] = round(stats['min_current'], 1)
+stats['max_power'] = round(stats['max_power'], 1)
+stats['min_power'] = round(stats['min_power'], 1)
+
+Modifier le return pour inclure ces stats :
+
+return {
+    "total": len(cycles),
+    "device_ids": list(set([r['device_id'] for r in records])),
+    "configs": configs,
+    "stats": stats,  # 🆕 Ajouter les stats
+    "filters": {
+        "device_id": device_id or "all",
+        "channel": channel or "all",
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "min_duration": min_duration
+    },
+    "cycles": cycles
+}
+
+
+PARTIE 2 : DASHBOARD - AFFICHAGE DES 4 NOUVEAUX KPI
+----------------------------------------------------
+
+Modifier web/dashboard.py dans la section HTML des stats cards :
+
+APRÈS la card "PUISSANCE MOY." et AVANT le tableau, ajouter :
+
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-label">MAX AMPÈRES</div>
+        <div class="stat-value" id="max-current">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MIN AMPÈRES</div>
+        <div class="stat-value" id="min-current">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MAX WATTS</div>
+        <div class="stat-value" id="max-power">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MIN WATTS</div>
+        <div class="stat-value" id="min-power">-</div>
+    </div>
+</div>
+
+Modifier le JavaScript dans loadCycles() après avoir mis à jour les stats existantes :
+
+// Mettre à jour les nouvelles stats min/max
+if (data.stats) {
+    document.getElementById('max-current').textContent = data.stats.max_current + ' A';
+    document.getElementById('min-current').textContent = data.stats.min_current + ' A';
+    document.getElementById('max-power').textContent = data.stats.max_power + ' W';
+    document.getElementById('min-power').textContent = data.stats.min_power + ' W';
+} else {
+    document.getElementById('max-current').textContent = '-';
+    document.getElementById('min-current').textContent = '-';
+    document.getElementById('max-power').textContent = '-';
+    document.getElementById('min-power').textContent = '-';
+}
+
+
+PARTIE 3 : DASHBOARD - TRI DES COLONNES
+----------------------------------------
+
+Modifier web/dashboard.py dans le JavaScript :
+
+3.1 Ajouter une variable globale pour tracker le tri en cours :
+
+let currentSort = {
+    column: null,
+    direction: 'asc'  // 'asc' ou 'desc'
+};
+
+3.2 Modifier les en-têtes de colonnes pour les rendre cliquables :
+
+Dans la section HTML du tableau, modifier les <th> :
+
+<thead>
+    <tr>
+        <th onclick="sortTable('device')">Device <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('channel')">Canal <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_date')">Date <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_time')">Heure début <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('end_time')">Heure fin <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('duration_minutes')">Durée <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('avg_power')">Puissance moy. <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('avg_current')">Courant moy. <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('energy_wh')">Énergie <span class="sort-icon">↕</span></th>
+    </tr>
+</thead>
+
+3.3 Ajouter le style pour les icônes de tri dans le <style> :
+
+.sort-icon {
+    opacity: 0.3;
+    font-size: 0.8rem;
+    margin-left: 4px;
+}
+
+th {
+    cursor: pointer;
+    user-select: none;
+}
+
+th:hover {
+    background: rgba(45, 134, 89, 0.1);
+}
+
+th.sorted-asc .sort-icon::after {
+    content: ' ▲';
+    opacity: 1;
+    color: #2d8659;
+}
+
+th.sorted-desc .sort-icon::after {
+    content: ' ▼';
+    opacity: 1;
+    color: #2d8659;
+}
+
+3.4 Ajouter la fonction sortTable() dans le JavaScript :
+
+function sortTable(column) {
+    // Déterminer la direction
+    if (currentSort.column === column) {
+        // Même colonne : alterner asc/desc/none
+        if (currentSort.direction === 'asc') {
+            currentSort.direction = 'desc';
+        } else if (currentSort.direction === 'desc') {
+            currentSort.column = null;
+            currentSort.direction = 'asc';
+            renderTable(currentData.cycles); // Retour à l'ordre original
+            updateSortIcons();
+            return;
+        }
+    } else {
+        // Nouvelle colonne : commencer par desc (plus logique)
+        currentSort.column = column;
+        currentSort.direction = 'desc';
+    }
+    
+    // Trier les données
+    const sortedCycles = [...currentData.cycles].sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+        
+        // Gestion des valeurs nulles
+        if (valA === null || valA === undefined) return 1;
+        if (valB === null || valB === undefined) return -1;
+        
+        // Comparaison
+        if (currentSort.direction === 'asc') {
+            return valA > valB ? 1 : -1;
+        } else {
+            return valA < valB ? 1 : -1;
+        }
+    });
+    
+    renderTable(sortedCycles);
+    updateSortIcons();
+}
+
+function updateSortIcons() {
+    // Retirer toutes les classes sorted
+    document.querySelectorAll('th').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+    });
+    
+    // Ajouter la classe sur la colonne triée
+    if (currentSort.column) {
+        const columns = ['device', 'channel', 'start_date', 'start_time', 'end_time', 
+                        'duration_minutes', 'avg_power', 'avg_current', 'energy_wh'];
+        const index = columns.indexOf(currentSort.column);
+        if (index !== -1) {
+            const th = document.querySelectorAll('th')[index];
+            th.classList.add(`sorted-${currentSort.direction}`);
+        }
+    }
+}
+
+3.5 Modifier renderTable() pour accepter un tableau trié en paramètre :
+
+function renderTable(cycles) {
+    // Si cycles n'est pas fourni, utiliser currentData.cycles
+    if (!cycles) {
+        cycles = currentData.cycles || [];
+    }
+    
+    const tbody = document.querySelector('tbody');
+    // ... reste du code existant, remplacer currentData.cycles par cycles
+}
+
+
+TESTS
+=====
+1. ✅ Recharger /dashboard avec des données
+2. ✅ Vérifier l'affichage des 4 nouveaux KPI (Max A, Min A, Max W, Min W)
+3. ✅ Cliquer sur "Durée" → Cycles triés du plus long au plus court
+4. ✅ Recliquer sur "Durée" → Cycles triés du plus court au plus long
+5. ✅ Recliquer sur "Durée" → Retour à l'ordre chronologique
+6. ✅ Tester le tri sur les autres colonnes (Date, Puissance, etc.)
+7. ✅ Vérifier que l'export CSV respecte l'ordre d'affichage
+
+RÉSULTAT ATTENDU
+================
+Dashboard avec 8 KPI au lieu de 4 :
+- Total cycles
+- En cours
+- Durée moyenne
+- Puissance moyenne
+- 🆕 Max Ampères
+- 🆕 Min Ampères
+- 🆕 Max Watts
+- 🆕 Min Watts
+
+Tableau avec en-têtes cliquables :
+- Icône ↕ sur chaque colonne
+- Premier clic → Tri décroissant (▼)
+- Deuxième clic → Tri croissant (▲)
+- Troisième clic → Retour à l'ordre original
+✅ AVANTAGES
+Feature	Bénéfice
+Max/Min Ampères	Détecte blocages (pic A) ou marche à sec (chute A)
+Max/Min Watts	Identifie surcharges ou désamorçages
+Tri colonnes	Trouve rapidement les anomalies (cycles trop longs/courts)
+UX simple	Clic sur en-tête = tri, comme Excel
+📊 EXEMPLE D'UTILISATION
+Scénario 1 : Détecter une pompe qui force
+Tu vois "Max Ampères : 7.1 A" (au lieu de 5.3A habituel)
+Tu cliques sur "Courant moy." pour trier
+Tu identifies le cycle anormal
+Scénario 2 : Trouver les cycles les plus longs
+Clic sur "Durée"
+Les cycles de 279 min et 289 min remontent en haut
+Tu peux vérifier s'ils sont normaux

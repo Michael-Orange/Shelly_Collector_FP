@@ -1,0 +1,271 @@
+CONTEXTE
+========
+Application Shelly_Collector_FP avec dashboard de monitoring.
+Besoin : Ajouter 4 KPI min/max et permettre le tri des colonnes existantes.
+
+OBJECTIF
+========
+1. Ajouter 4 indicateurs sur la période filtrée :
+   - Max Ampères, Min Ampères, Max Watts, Min Watts
+
+2. Permettre le tri des colonnes du tableau existant en cliquant sur les en-têtes.
+
+Simplicité : Travailler avec les colonnes déjà présentes, pas d'ajout de nouvelles colonnes.
+
+SPÉCIFICATIONS
+===============
+
+PARTIE 1 : VÉRIFICATION CYCLE DETECTOR
+---------------------------------------
+
+Vérifier dans services/cycle_detector.py si avg_current est calculé.
+
+Si la fonction detect_cycles() retourne déjà avg_current → Passer à la partie 2.
+
+Si avg_current n'existe PAS → L'ajouter :
+
+Dans detect_cycles(), après avoir calculé avg_power_w, ajouter :
+
+# Calculer le courant moyen
+avg_current = sum([r['current_a'] for r in cycle_records if r['current_a'] is not None]) / len(cycle_records) if cycle_records else 0
+avg_current = round(avg_current, 1)
+
+Et l'inclure dans le cycle dict :
+
+cycles.append({
+    "device_id": device_id,
+    "channel": channel,
+    "start_timestamp": start_ts,
+    "end_timestamp": end_ts,
+    "start_date": start_date,
+    "start_time": start_time,
+    "end_time": end_time,
+    "duration_minutes": duration_min,
+    "avg_power_w": avg_power_w,
+    "avg_current": avg_current,  # 🆕 Ajouter cette ligne
+    "total_records": len(cycle_records)
+})
+
+
+PARTIE 2 : API - CALCUL DES STATS MIN/MAX
+------------------------------------------
+
+Modifier api/routes.py dans get_pump_cycles() :
+
+Après avoir récupéré les cycles, calculer les stats :
+
+# Calculer les stats min/max
+stats = {
+    "max_current": 0,
+    "min_current": float('inf'),
+    "max_power": 0,
+    "min_power": float('inf')
+}
+
+for cycle in cycles:
+    # Puissance
+    if cycle.get('avg_power_w') is not None:
+        stats['max_power'] = max(stats['max_power'], cycle['avg_power_w'])
+        stats['min_power'] = min(stats['min_power'], cycle['avg_power_w'])
+    
+    # Courant
+    if cycle.get('avg_current') is not None:
+        stats['max_current'] = max(stats['max_current'], cycle['avg_current'])
+        stats['min_current'] = min(stats['min_current'], cycle['avg_current'])
+
+# Si aucune donnée, mettre à 0
+if stats['min_current'] == float('inf'):
+    stats['min_current'] = 0
+if stats['min_power'] == float('inf'):
+    stats['min_power'] = 0
+
+# Arrondir
+stats = {k: round(v, 1) for k, v in stats.items()}
+
+Modifier le return :
+
+return {
+    "total": len(cycles),
+    "device_ids": list(set([r['device_id'] for r in records])),
+    "configs": configs,
+    "stats": stats,  # 🆕
+    "filters": {...},
+    "cycles": cycles
+}
+
+
+PARTIE 3 : DASHBOARD - 4 NOUVEAUX KPI
+--------------------------------------
+
+Modifier web/dashboard.py :
+
+3.1 Ajouter les 4 cards dans le HTML après les stats existantes :
+
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-label">MAX AMPÈRES</div>
+        <div class="stat-value" id="max-current">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MIN AMPÈRES</div>
+        <div class="stat-value" id="min-current">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MAX WATTS</div>
+        <div class="stat-value" id="max-power">-</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">MIN WATTS</div>
+        <div class="stat-value" id="min-power">-</div>
+    </div>
+</div>
+
+3.2 Mettre à jour les stats dans loadCycles() :
+
+// Après avoir mis à jour les stats existantes
+if (data.stats) {
+    document.getElementById('max-current').textContent = data.stats.max_current + ' A';
+    document.getElementById('min-current').textContent = data.stats.min_current + ' A';
+    document.getElementById('max-power').textContent = data.stats.max_power + ' W';
+    document.getElementById('min-power').textContent = data.stats.min_power + ' W';
+}
+
+
+PARTIE 4 : DASHBOARD - TRI DES COLONNES EXISTANTES
+---------------------------------------------------
+
+4.1 Identifier les colonnes actuelles du tableau dans web/dashboard.py.
+
+Supposons qu'elles sont :
+- Device, Canal, Date, Heure début, Heure fin, Durée, Puissance moy.
+
+4.2 Ajouter une variable globale dans le JavaScript :
+
+let currentSort = { column: null, direction: 'asc' };
+
+4.3 Rendre les <th> cliquables (modifier le HTML du tableau) :
+
+<thead>
+    <tr>
+        <th onclick="sortTable('device_id')">Device <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('channel')">Canal <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_date')">Date <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_time')">Heure début <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('end_time')">Heure fin <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('duration_minutes')">Durée <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('avg_power_w')">Puissance moy. <span class="sort-icon">↕</span></th>
+    </tr>
+</thead>
+
+4.4 Ajouter le style CSS :
+
+.sort-icon {
+    opacity: 0.3;
+    font-size: 0.8rem;
+    margin-left: 4px;
+}
+
+th {
+    cursor: pointer;
+    user-select: none;
+}
+
+th:hover {
+    background: rgba(45, 134, 89, 0.1);
+}
+
+th.sorted-asc .sort-icon {
+    opacity: 1;
+    color: #2d8659;
+}
+
+th.sorted-asc .sort-icon::after {
+    content: ' ▲';
+}
+
+th.sorted-desc .sort-icon {
+    opacity: 1;
+    color: #2d8659;
+}
+
+th.sorted-desc .sort-icon::after {
+    content: ' ▼';
+}
+
+4.5 Ajouter les fonctions de tri :
+
+function sortTable(column) {
+    // Déterminer direction
+    if (currentSort.column === column) {
+        if (currentSort.direction === 'desc') {
+            currentSort.direction = 'asc';
+        } else if (currentSort.direction === 'asc') {
+            // Reset : retour à l'ordre original
+            currentSort.column = null;
+            renderTable(currentData.cycles);
+            updateSortIcons();
+            return;
+        }
+    } else {
+        currentSort.column = column;
+        currentSort.direction = 'desc';
+    }
+    
+    // Trier
+    const sorted = [...currentData.cycles].sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+        
+        if (valA == null) return 1;
+        if (valB == null) return -1;
+        
+        const mult = currentSort.direction === 'asc' ? 1 : -1;
+        return valA > valB ? mult : -mult;
+    });
+    
+    renderTable(sorted);
+    updateSortIcons();
+}
+
+function updateSortIcons() {
+    document.querySelectorAll('th').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+    });
+    
+    if (currentSort.column) {
+        // Trouver le th correspondant et ajouter la classe
+        const ths = document.querySelectorAll('th');
+        const columns = ['device_id', 'channel', 'start_date', 'start_time', 'end_time', 'duration_minutes', 'avg_power_w'];
+        const index = columns.indexOf(currentSort.column);
+        if (index >= 0 && ths[index]) {
+            ths[index].classList.add(`sorted-${currentSort.direction}`);
+        }
+    }
+}
+
+4.6 Modifier renderTable() pour accepter un tableau en paramètre :
+
+function renderTable(cycles = null) {
+    const cyclesToRender = cycles || currentData.cycles || [];
+    const tbody = document.querySelector('tbody');
+    
+    // ... reste du code, utiliser cyclesToRender au lieu de currentData.cycles
+}
+
+
+TESTS
+=====
+1. ✅ Vérifier que avg_current est bien calculé et retourné
+2. ✅ Dashboard affiche les 4 nouveaux KPI
+3. ✅ Cliquer sur "Durée" → Tri décroissant (▼)
+4. ✅ Recliquer → Tri croissant (▲)
+5. ✅ Recliquer → Retour à l'ordre original
+6. ✅ Tester le tri sur d'autres colonnes
+
+RÉSULTAT ATTENDU
+================
+Dashboard avec 8 KPI au lieu de 4 :
+- Total cycles, En cours, Durée moy., Puissance moy.
+- 🆕 Max A, Min A, Max W, Min W
+
+Tableau avec colonnes triables (ordre : desc → asc → original).
