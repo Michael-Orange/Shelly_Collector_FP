@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+import os
 import config
 from services.cycle_detector import detect_cycles
 from services.config_service import (
@@ -371,3 +372,13 @@ async def delete_pump_model_route(request: Request, pump_id: int):
     except Exception as e:
         print(f"❌ Error deleting pump model: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/verify-export-password")
+async def verify_export_password(request: Request):
+    body = await request.json()
+    password = body.get("password", "")
+    expected = os.environ.get("CSV_EXPORT_PASSWORD", "")
+    if not expected or password != expected:
+        raise HTTPException(status_code=403, detail="Mot de passe incorrect")
+    return {"success": True}

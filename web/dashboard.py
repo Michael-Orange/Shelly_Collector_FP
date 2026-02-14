@@ -907,9 +907,26 @@ def render_dashboard() -> str:
             }
         }
 
-        function exportCSV() {
+        async function exportCSV() {
             if (!currentData || currentData.cycles.length === 0) {
                 alert('Aucune donn\u00e9e \u00e0 exporter');
+                return;
+            }
+
+            var pwd = prompt('Mot de passe requis pour l\'export CSV :');
+            if (!pwd) return;
+            try {
+                var res = await fetch('/api/verify-export-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({password: pwd})
+                });
+                if (!res.ok) {
+                    alert('Mot de passe incorrect');
+                    return;
+                }
+            } catch(e) {
+                alert('Erreur de v\u00e9rification');
                 return;
             }
 
