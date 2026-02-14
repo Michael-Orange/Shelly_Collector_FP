@@ -238,6 +238,12 @@ def render_dashboard() -> str:
             box-shadow: 0 2px 6px rgba(0,0,0,0.05);
         }
 
+        #table-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -400,6 +406,31 @@ def render_dashboard() -> str:
 
             .treatment-stat-value {
                 font-size: 24px;
+            }
+        }
+
+        @media (max-width: 767px) {
+            table {
+                min-width: 900px;
+            }
+
+            #table-wrapper::before {
+                content: '\\1F449 Faites defiler pour voir toutes les colonnes';
+                display: block;
+                text-align: center;
+                font-size: 11px;
+                color: #666;
+                background: #f9f9f9;
+                padding: 8px;
+                border-bottom: 1px solid #ddd;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .treatment-stats {
+                grid-template-columns: 1fr;
             }
         }
     </style>
