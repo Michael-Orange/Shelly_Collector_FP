@@ -1,0 +1,140 @@
+📋 BRIEF DE CORRECTION POUR REPLIT (VERSION COMPLÈTE)
+Copie-colle ce bloc dans Replit :
+# CORRECTIONS DASHBOARD - Labels et Encodage UTF-8 GLOBAL
+
+## OBJECTIF
+1. Clarifier que les métriques concernent la période sélectionnée
+2. Corriger l'encodage UTF-8 sur TOUTES les pages web de l'application
+
+## 1. MODIFICATION DES LABELS (Option A)
+
+Dans /web/dashboard.py, modifier les 4 colonnes du bandeau "TRAITEMENT & IMPACT ENVIRONNEMENTAL" :
+
+### Colonne 1 - Eau traitée
+AVANT : "📊 Eau traitée"
+APRÈS : "📊 Eau traitée (période)"
+
+### Colonne 2 - Par jour
+AVANT : "📅 Par jour"
+APRÈS : "📅 Traitement journalier"
+
+### Colonne 3 - Émissions évitées
+AVANT : "🌱 Émissions évitées"
+APRÈS : "🌱 CO₂e évité (période)"
+
+### Colonne 4 - Réduction
+GARDER : "✅ Réduction"
+
+## 2. CORRECTION ENCODAGE UTF-8 GLOBAL
+
+### A. Vérifier TOUS les fichiers HTML (/web/*.py)
+
+Fichiers concernés :
+- /web/dashboard.py
+- /web/admin.py
+- Tout autre fichier générant du HTML
+
+Dans CHAQUE fichier, s'assurer que le <head> contient :
+```html
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>...</title>
+    ...
+</head>
+B. Créer une fonction helper pour les réponses HTML (RECOMMANDÉ)
+Dans /api/routes.py ou un nouveau /utils/html_helpers.py :
+from fastapi.responses import HTMLResponse
+
+def html_response(content: str) -> HTMLResponse:
+    """
+    Retourne une HTMLResponse avec encodage UTF-8 forcé.
+    À utiliser pour toutes les réponses HTML de l'app.
+    """
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache"
+        }
+    )
+C. Utiliser cette fonction dans TOUTES les routes HTML
+Dans main.py ou routes.py, modifier les endpoints :
+from utils.html_helpers import html_response  # ou depuis routes.py si créé là
+from web.dashboard import render_dashboard
+from web.admin import render_admin
+
+@app.get("/")
+async def get_dashboard():
+    html_content = render_dashboard()
+    return html_response(html_content)
+
+@app.get("/admin")
+async def get_admin():
+    html_content = render_admin()
+    return html_response(html_content)
+
+# Appliquer pour TOUTES les autres routes HTML existantes
+D. Vérifier l'encodage des fichiers Python
+S'assurer que TOUS les fichiers .py qui contiennent du texte français sont sauvés en UTF-8 :
+/web/dashboard.py
+/web/admin.py
+/api/routes.py
+/services/*.py
+config.py
+Sur Replit, c'est normalement automatique, mais vérifier si besoin.
+3. TESTS À EFFECTUER
+Test 1 : Page Dashboard (/)
+✅ "Eau traitée (période)" avec accents
+✅ "CO₂e évité (période)" avec accents
+✅ "Réduction d'émissions par rapport à une fosse standard"
+✅ Tous les autres textes français
+Test 2 : Page Admin (/admin)
+✅ "Qualité des eaux brutes"
+✅ Tous les labels avec accents
+✅ Messages d'erreur/succès
+Test 3 : Autres pages HTML
+✅ Vérifier toutes les pages qui affichent du texte français
+Test 4 : Console navigateur
+✅ Aucune erreur de décodage dans la console
+✅ Inspecter le header HTTP : Content-Type doit être "text/html; charset=utf-8"
+4. RÉSULTAT ATTENDU
+Dashboard
+┌────────────────────────────────────────────────────────────────┐
+│ 💧 TRAITEMENT & IMPACT ENVIRONNEMENTAL                         │
+├────────────────────────────────────────────────────────────────┤
+│  📊 Eau traitée       │  📅 Traitement      │  🌱 CO₂e évité   │
+│     (période)         │     journalier      │     (période)    │
+│  15.3 m³              │  0.05 m³/jour       │  68.9 kg CO₂e    │
+│                                             │  ✅ Réduction    │
+│                                             │  -94%            │
+│                                                                 │
+│  ℹ️ Réduction d'émissions par rapport à une fosse standard     │
+└────────────────────────────────────────────────────────────────┘
+TOUS les textes français
+Accents correctement affichés sur TOUTES les pages
+Pas de caractères bizarres type "Ã©" au lieu de "é"
+Headers HTTP corrects sur toutes les routes HTML
+5. CHECKLIST COMPLÈTE
+ Modifier labels dashboard (3 changements)
+ Vérifier <meta charset="UTF-8"> dans dashboard.py
+ Vérifier <meta charset="UTF-8"> dans admin.py
+ Créer fonction html_response() helper
+ Appliquer html_response() sur route GET /
+ Appliquer html_response() sur route GET /admin
+ Appliquer html_response() sur toutes autres routes HTML
+ Tester affichage accents sur /
+ Tester affichage accents sur /admin
+ Vérifier console navigateur (aucune erreur)
+ Vérifier Content-Type dans headers HTTP
+
+---
+
+## ✅ **POURQUOI CETTE APPROCHE ?**
+
+1. **Fonction helper centralisée** : Un seul endroit pour gérer l'encodage (DRY principle)
+2. **Maintenable** : Si besoin de changer headers plus tard, un seul endroit à modifier
+3. **Cohérent** : Toutes les pages HTML ont le même comportement
+4. **Robuste** : Évite les oublis futurs lors d'ajout de nouvelles pages
