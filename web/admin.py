@@ -32,6 +32,12 @@ def render_admin() -> str:
         .success { background: #d4edda; color: #155724; }
         .error { background: #f8d7da; color: #721c24; }
         .loading { text-align: center; padding: 3rem; color: #7f8c8d; }
+        .invalid-input { border: 2px solid #dc3545 !important; background-color: #fff5f5 !important; }
+        .col-headers { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.3rem; font-size: 0.75rem; color: #888; font-weight: 600; text-transform: uppercase; }
+        .col-headers .col-label { min-width: 120px; }
+        .col-headers .col-name { flex: 1; }
+        .col-headers .col-model { flex: 2; }
+        .col-headers .col-flow { width: 120px; text-align: center; }
         @media (max-width: 768px) {
             .container { padding: 0 1rem; }
             .input-row { flex-direction: column; align-items: stretch; }
@@ -77,7 +83,7 @@ def render_admin() -> str:
         }
 
         function formatPumpOption(pump) {
-            var flowInfo = pump.flow_rate_hmt8 ? ', ' + pump.flow_rate_hmt8 + ' m3/h' : '';
+            var flowInfo = pump.flow_rate_hmt8 ? ', ' + pump.flow_rate_hmt8 + ' m3/h si HMT 8' : '';
             return pump.name + ' (' + pump.power_kw.toFixed(2) + ' kW, ' + pump.current_ampere.toFixed(1) + ' A' + flowInfo + ')';
         }
 
@@ -111,17 +117,25 @@ def render_admin() -> str:
                         '<input id="dn-' + safeId + '" value="' + deviceName + '" placeholder="Ex: Client 1">' +
                     '</div>' +
                     '<div class="channels">' +
+                        '<div class="col-headers">' +
+                            '<div class="col-label"></div>' +
+                            '<div class="col-name">Nom</div>' +
+                            '<div class="col-model">Modele</div>' +
+                            '<div class="col-flow">Debit (m3/h)</div>' +
+                        '</div>' +
                         device.channels.map(function(ch) {
                             var safeCh = escapeHtml(ch);
                             var chConfig = channelConfigs[ch] || {};
                             var chName = escapeHtml(chConfig.channel_name || channelNames[ch] || '');
                             var pumpModelId = chConfig.pump_model_id || null;
+                            var flowRate = (chConfig.flow_rate != null && !isNaN(chConfig.flow_rate)) ? parseFloat(Number(chConfig.flow_rate).toFixed(2)) : '';
                             var selectId = 'pm-' + safeId + '-' + safeCh;
 
                             return '<div class="input-row">' +
                                 '<label>' + safeCh + ':</label>' +
                                 '<input id="cn-' + safeId + '-' + safeCh + '" value="' + chName + '" placeholder="Ex: Pompe PR" style="flex:1;">' +
                                 buildPumpSelect(selectId, pumpModelId) +
+                                '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="Debit" title="Debit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
                             '</div>';
                         }).join('') +
                     '</div>' +
@@ -134,16 +148,30 @@ def render_admin() -> str:
             var deviceNameInput = document.getElementById('dn-' + deviceId);
             var deviceName = deviceNameInput ? deviceNameInput.value.trim() : '';
 
-            var channelData = channels.map(function(ch) {
+            var channelData = [];
+            for (var i = 0; i < channels.length; i++) {
+                var ch = channels[i];
                 var nameInput = document.getElementById('cn-' + deviceId + '-' + ch);
                 var modelSelect = document.getElementById('pm-' + deviceId + '-' + ch);
+                var flowInput = document.getElementById('fr-' + deviceId + '-' + ch);
                 var pumpModelId = modelSelect ? modelSelect.value : '';
-                return {
+                var flowVal = flowInput ? flowInput.value.trim() : '';
+
+                if (flowVal !== '' && (isNaN(parseFloat(flowVal)) || parseFloat(flowVal) < 0)) {
+                    flowInput.classList.add('invalid-input');
+                    flowInput.focus();
+                    showMsg('error', 'Debit effectif invalide pour ' + (nameInput ? nameInput.value || ch : ch));
+                    return;
+                }
+                if (flowInput) flowInput.classList.remove('invalid-input');
+
+                channelData.push({
                     channel: ch,
                     name: nameInput ? nameInput.value.trim() : '',
-                    pump_model_id: pumpModelId ? parseInt(pumpModelId) : null
-                };
-            });
+                    pump_model_id: pumpModelId ? parseInt(pumpModelId) : null,
+                    flow_rate: flowVal !== '' ? parseFloat(flowVal) : null
+                });
+            }
 
             try {
                 var res = await fetch('/api/config/device', {
@@ -155,7 +183,12 @@ def render_admin() -> str:
                         channels: channelData
                     })
                 });
-                showMsg(res.ok ? 'success' : 'error', res.ok ? 'Configuration enregistree !' : 'Erreur');
+                if (res.ok) {
+                    showMsg('success', 'Configuration enregistree !');
+                } else {
+                    var errData = await res.json().catch(function() { return {}; });
+                    showMsg('error', errData.detail || 'Erreur');
+                }
             } catch(e) {
                 showMsg('error', 'Erreur reseau');
             }

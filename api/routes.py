@@ -176,6 +176,9 @@ async def update_device_name(request: Request):
         return {"success": True}
     except HTTPException:
         raise
+    except ValueError as e:
+        print(f"❌ Validation error: {e}", flush=True)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         print(f"❌ Error updating device name: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -24,7 +24,7 @@ async def get_configs_map(pool: asyncpg.Pool) -> Dict:
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT dc.device_id, dc.device_name, dc.channel, dc.channel_name,
-                   dc.pump_model_id,
+                   dc.pump_model_id, dc.flow_rate,
                    pm.id as pm_id, pm.name as pm_name, pm.power_kw as pm_power_kw,
                    pm.current_ampere as pm_current_ampere, pm.flow_rate_hmt8 as pm_flow_rate_hmt8
             FROM device_config dc
@@ -52,7 +52,8 @@ async def get_configs_map(pool: asyncpg.Pool) -> Dict:
             configs[device_id]['channels'][row['channel']] = {
                 'channel_name': row['channel_name'],
                 'pump_model_id': row['pump_model_id'],
-                'pump_model': pump_model
+                'pump_model': pump_model,
+                'flow_rate': row['flow_rate']
             }
 
     return configs
@@ -129,6 +130,18 @@ async def delete_pump_model(pool: asyncpg.Pool, pump_id: int) -> dict:
 
 
 async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device_name: Optional[str], channels: List[Dict]):
+    for ch in channels:
+        fr = ch.get('flow_rate')
+        if fr is not None and fr != '':
+            try:
+                fv = float(fr)
+                if fv < 0:
+                    raise ValueError(f"Debit effectif doit etre positif pour {ch.get('channel', '?')}")
+            except (ValueError, TypeError) as e:
+                if 'positif' in str(e):
+                    raise
+                raise ValueError(f"Debit effectif invalide pour {ch.get('channel', '?')}: {fr}")
+
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("""
@@ -136,9 +149,11 @@ async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device
                 WHERE device_id = $1
             """, device_id, device_name)
             for ch in channels:
+                fr = ch.get('flow_rate')
+                flow_rate_val = float(fr) if fr is not None and fr != '' else None
                 await conn.execute("""
-                    INSERT INTO device_config (device_id, device_name, channel, channel_name, pump_model_id)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO device_config (device_id, device_name, channel, channel_name, pump_model_id, flow_rate)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (device_id, channel)
-                    DO UPDATE SET channel_name = $4, pump_model_id = $5, device_name = $2, updated_at = NOW()
-                """, device_id, device_name, ch['channel'], ch.get('name'), ch.get('pump_model_id'))
+                    DO UPDATE SET channel_name = $4, pump_model_id = $5, device_name = $2, flow_rate = $6, updated_at = NOW()
+                """, device_id, device_name, ch['channel'], ch.get('name'), ch.get('pump_model_id'), flow_rate_val)

@@ -4,7 +4,16 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-14 (Latest)**: Pump models management + admin enhancements:
+**2026-02-14 (Latest)**: Ajout champ Débit effectif (flow_rate) :
+- **New**: `flow_rate` REAL NULL column added to `device_config`
+- **Modified**: `/admin` page — new "Débit (m3/h)" column per channel with validation
+- **Modified**: `upsert_device_with_channels()` — saves/validates flow_rate (positive number)
+- **Modified**: `get_configs_map()` — returns flow_rate in channel_configs
+- **Modified**: `POST /api/config/device` — returns 400 on invalid flow_rate
+- **Modified**: Pump model select format now shows "si HMT 8" suffix
+- **Modified**: Column headers (NOM, MODELE, DEBIT) above channel rows
+
+**2026-02-14**: Pump models management + admin enhancements:
 - **New**: `pump_models` table — catalogue of pump models (name, power_kw, current_ampere, flow_rate_hmt8)
 - **New**: 2 initial Pedrollo models seeded at startup (VXM 10/35, DM/8)
 - **New**: `pump_model_id` column added to `device_config` (FK to pump_models)
@@ -194,6 +203,7 @@ CREATE TABLE pump_models (
 );
 
 -- device_config also has: pump_model_id INTEGER REFERENCES pump_models(id)
+-- device_config also has: flow_rate REAL NULL
 ```
 
 ## Deployment
