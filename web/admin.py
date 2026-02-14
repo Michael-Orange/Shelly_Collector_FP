@@ -54,7 +54,7 @@ def render_admin() -> str:
         <h1>FiltrePlante - Configuration</h1>
         <div class="header-links">
             <a href="/dashboard">&#8592; Retour au dashboard</a>
-            <a href="/admin/pumps" class="btn-manage-pumps">Gerer les modeles de pompes</a>
+            <a href="/admin/pumps" class="btn-manage-pumps">G&#233;rer les mod&#232;les de pompes</a>
         </div>
     </div>
 
@@ -92,7 +92,7 @@ def render_admin() -> str:
 
         function buildPumpSelect(selectId, selectedModelId) {
             var html = '<select id="' + selectId + '" style="flex:2;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;background:white;">';
-            html += '<option value="">-- Aucun modele --</option>';
+            html += '<option value="">-- Aucun mod\u00e8le --</option>';
             pumpModels.forEach(function(pump) {
                 var selected = (selectedModelId && selectedModelId == pump.id) ? ' selected' : '';
                 html += '<option value="' + pump.id + '"' + selected + '>' + escapeHtml(formatPumpOption(pump)) + '</option>';
@@ -104,7 +104,7 @@ def render_admin() -> str:
         function render() {
             var container = document.getElementById('devices');
             if (data.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:#7f8c8d;padding:2rem;">Aucun device trouve dans les donnees.</p>';
+                container.innerHTML = '<p style="text-align:center;color:#7f8c8d;padding:2rem;">Aucun device trouv\u00e9 dans les donn\u00e9es.</p>';
                 return;
             }
             container.innerHTML = data.map(function(device) {
@@ -123,9 +123,9 @@ def render_admin() -> str:
                         '<div class="col-headers">' +
                             '<div class="col-label"></div>' +
                             '<div class="col-name">Nom</div>' +
-                            '<div class="col-model">Modele</div>' +
+                            '<div class="col-model">Mod\u00e8le</div>' +
                             '<div class="col-type">Type de poste</div>' +
-                            '<div class="col-flow">Debit (m3/h)</div>' +
+                            '<div class="col-flow">D\u00e9bit (m3/h)</div>' +
                         '</div>' +
                         device.channels.map(function(ch) {
                             var safeCh = escapeHtml(ch);
@@ -146,13 +146,13 @@ def render_admin() -> str:
                                     '<option value="sortie"' + (pumpType === 'sortie' ? ' selected' : '') + '>Sortie</option>' +
                                     '<option value="autre"' + (pumpType === 'autre' ? ' selected' : '') + '>Autre</option>' +
                                 '</select>' +
-                                '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="Debit" title="Debit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
+                                '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="D\u00e9bit" title="D\u00e9bit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
                             '</div>';
                         }).join('') +
                     '</div>' +
                     '<div style="border-top: 2px solid #e5e7eb; margin: 30px 0 20px 0; padding-top: 20px;">' +
-                        '<h3 style="font-size: 1.05rem; font-weight: 600; color: #2d8659; margin-bottom: 6px;">&#x1F4A7; Qualite des eaux brutes</h3>' +
-                        '<p style="font-size: 0.85rem; color: #6b7280; margin-bottom: 15px;">Valeurs moyennes estimees des eaux du site</p>' +
+                        '<h3 style="font-size: 1.05rem; font-weight: 600; color: #2d8659; margin-bottom: 6px;">&#x1F4A7; Qualit\u00e9 des eaux brutes</h3>' +
+                        '<p style="font-size: 0.85rem; color: #6b7280; margin-bottom: 15px;">Valeurs moyennes estim\u00e9es des eaux du site</p>' +
                     '</div>' +
                     '<div class="water-quality-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2d8659; margin-bottom: 1rem;">' +
                         '<div>' +
@@ -191,7 +191,7 @@ def render_admin() -> str:
                 if (flowVal !== '' && (isNaN(parseFloat(flowVal)) || parseFloat(flowVal) < 0)) {
                     flowInput.classList.add('invalid-input');
                     flowInput.focus();
-                    showMsg('error', 'Debit effectif invalide pour ' + (nameInput ? nameInput.value || ch : ch));
+                    showMsg('error', 'D\u00e9bit effectif invalide pour ' + (nameInput ? nameInput.value || ch : ch));
                     return;
                 }
                 if (flowInput) flowInput.classList.remove('invalid-input');
@@ -232,7 +232,7 @@ def render_admin() -> str:
                     showMsg('error', errData.detail || 'Erreur');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur reseau');
+                showMsg('error', 'Erreur r\u00e9seau');
             }
         }
 
@@ -257,7 +257,7 @@ def render_pumps_admin() -> str:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <title>FiltrePlante - Modeles de pompes</title>
+    <title>FiltrePlante - Mod&#232;les de pompes</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; color: #2c3e50; }
@@ -300,19 +300,19 @@ def render_pumps_admin() -> str:
 </head>
 <body>
     <div class="header">
-        <h1>FiltrePlante - Modeles de pompes</h1>
-        <a href="/admin">&#8592; Retour a la configuration</a>
+        <h1>FiltrePlante - Mod&#232;les de pompes</h1>
+        <a href="/admin">&#8592; Retour &#224; la configuration</a>
     </div>
 
     <div class="container">
         <div id="msg" class="msg"></div>
 
         <div class="card">
-            <h2 id="form-title">Ajouter un nouveau modele</h2>
+            <h2 id="form-title">Ajouter un nouveau mod&#232;le</h2>
             <form id="pump-form" onsubmit="handleSubmit(event)">
                 <input type="hidden" id="pump-id" value="">
                 <div class="form-row">
-                    <label>Nom du modele *</label>
+                    <label>Nom du mod&#232;le *</label>
                     <input type="text" id="pump-name" required placeholder="Ex: Pedrollo VXM 10/35">
                 </div>
                 <div class="form-row">
@@ -320,11 +320,11 @@ def render_pumps_admin() -> str:
                     <input type="number" id="pump-power" step="0.01" min="0" required placeholder="Ex: 0.75">
                 </div>
                 <div class="form-row">
-                    <label>Intensite a 230V (A) *</label>
+                    <label>Intensit&#233; &#224; 230V (A) *</label>
                     <input type="number" id="pump-current" step="0.1" min="0" required placeholder="Ex: 4.8">
                 </div>
                 <div class="form-row">
-                    <label>Debit a HMT=8 (m3/h)</label>
+                    <label>D&#233;bit &#224; HMT=8 (m3/h)</label>
                     <input type="number" id="pump-flow" step="0.1" min="0" placeholder="Ex: 18.0 (vide si N/A)">
                 </div>
                 <div class="form-actions">
@@ -335,14 +335,14 @@ def render_pumps_admin() -> str:
         </div>
 
         <div class="card">
-            <h2>Modeles existants</h2>
+            <h2>Mod&#232;les existants</h2>
             <table>
                 <thead>
                     <tr>
                         <th>Nom</th>
                         <th>Puissance (kW)</th>
-                        <th>Intensite (A)</th>
-                        <th>Debit (m3/h)</th>
+                        <th>Intensit&#233; (A)</th>
+                        <th>D&#233;bit (m3/h)</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -370,7 +370,7 @@ def render_pumps_admin() -> str:
         function renderTable() {
             var tbody = document.getElementById('pumps-tbody');
             if (pumps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun modele de pompe</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun mod\u00e8le de pompe</td></tr>';
                 return;
             }
             tbody.innerHTML = pumps.map(function(pump) {
@@ -415,14 +415,14 @@ def render_pumps_admin() -> str:
                 });
                 var data = await res.json();
                 if (res.ok && data.success) {
-                    showMsg('success', pumpId ? 'Modele modifie !' : 'Modele cree !');
+                    showMsg('success', pumpId ? 'Mod\u00e8le modifi\u00e9 !' : 'Mod\u00e8le cr\u00e9\u00e9 !');
                     resetForm();
                     loadPumps();
                 } else {
                     showMsg('error', data.error || 'Erreur');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur reseau');
+                showMsg('error', 'Erreur r\u00e9seau');
             }
         }
 
@@ -434,26 +434,26 @@ def render_pumps_admin() -> str:
             document.getElementById('pump-power').value = pump.power_kw;
             document.getElementById('pump-current').value = pump.current_ampere;
             document.getElementById('pump-flow').value = pump.flow_rate_hmt8 || '';
-            document.getElementById('form-title').textContent = 'Modifier: ' + pump.name;
+            document.getElementById('form-title').textContent = 'Modifier : ' + pump.name;
             window.scrollTo({top: 0, behavior: 'smooth'});
         }
 
         async function deletePump(id) {
             var pump = pumps.find(function(p) { return p.id === id; });
             if (!pump) return;
-            if (!confirm('Supprimer le modele "' + pump.name + '" ?')) return;
+            if (!confirm('Supprimer le mod\u00e8le "' + pump.name + '" ?')) return;
 
             try {
                 var res = await fetch('/api/config/pump-model/' + id, { method: 'DELETE' });
                 var data = await res.json();
                 if (data.success) {
-                    showMsg('success', 'Modele supprime !');
+                    showMsg('success', 'Mod\u00e8le supprim\u00e9 !');
                     loadPumps();
                 } else {
                     showMsg('error', data.error || 'Erreur de suppression');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur reseau');
+                showMsg('error', 'Erreur r\u00e9seau');
             }
         }
 
@@ -463,7 +463,7 @@ def render_pumps_admin() -> str:
             document.getElementById('pump-power').value = '';
             document.getElementById('pump-current').value = '';
             document.getElementById('pump-flow').value = '';
-            document.getElementById('form-title').textContent = 'Ajouter un nouveau modele';
+            document.getElementById('form-title').textContent = 'Ajouter un nouveau mod\u00e8le';
         }
 
         function escapeHtml(str) {

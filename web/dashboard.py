@@ -446,7 +446,7 @@ def render_dashboard() -> str:
 <body>
     <div class="header">
         <h1><span>🌱</span> FiltrePlante - Monitoring des Pompes</h1>
-        <p>Suivi en temps reel des cycles de demarrage et d'arret | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
+        <p>Suivi en temps r&#233;el des cycles de d&#233;marrage et d'arr&#234;t | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
     </div>
 
     <div class="container">
@@ -467,7 +467,7 @@ def render_dashboard() -> str:
                 </div>
 
                 <div class="filter-group">
-                    <label for="start-date">Date debut</label>
+                    <label for="start-date">Date d&#233;but</label>
                     <input type="date" id="start-date">
                 </div>
 
@@ -478,13 +478,13 @@ def render_dashboard() -> str:
             </div>
 
             <div class="buttons">
-                <button class="btn-primary" onclick="loadCycles()">Rafraichir</button>
+                <button class="btn-primary" onclick="loadCycles()">Rafra&#238;chir</button>
                 <button class="btn-secondary" onclick="exportCSV()">Exporter CSV</button>
             </div>
         </div>
 
         <div class="stats-card">
-            <h3>SYNTHESE DES CYCLES</h3>
+            <h3>SYNTH&#200;SE DES CYCLES</h3>
 
             <div class="stats-grid">
                 <div class="stat-box">
@@ -498,7 +498,7 @@ def render_dashboard() -> str:
                 </div>
 
                 <div class="stat-box">
-                    <div class="stat-box-title">&#x23F1;&#xFE0F; DUREE MOYENNE</div>
+                    <div class="stat-box-title">&#x23F1;&#xFE0F; DUR&#201;E MOYENNE</div>
                     <div class="stat-box-line">
                         <span class="stat-value" id="stat-avg-duration">-</span>
                     </div>
@@ -512,7 +512,7 @@ def render_dashboard() -> str:
                 <div class="stat-box">
                     <div class="stat-box-title">&#x1F4AA; PUISSANCE (W)</div>
                     <div class="stat-box-line">
-                        <span class="stat-value" id="stat-median-power">-</span> (mediane)
+                        <span class="stat-value" id="stat-median-power">-</span> (m&#233;diane)
                     </div>
                     <div class="stat-box-line stat-subtitle">
                         Plage: <span id="stat-power-range">-</span>
@@ -520,9 +520,9 @@ def render_dashboard() -> str:
                 </div>
 
                 <div class="stat-box">
-                    <div class="stat-box-title">&#x1F4C8; INTENSITE (A)</div>
+                    <div class="stat-box-title">&#x1F4C8; INTENSIT&#201; (A)</div>
                     <div class="stat-box-line">
-                        <span class="stat-value" id="stat-median-ampere">-</span> (mediane)
+                        <span class="stat-value" id="stat-median-ampere">-</span> (m&#233;diane)
                     </div>
                     <div class="stat-box-line stat-subtitle">
                         Plage: <span id="stat-ampere-range">-</span>
@@ -535,35 +535,35 @@ def render_dashboard() -> str:
             <h3>&#x1F4A7; TRAITEMENT &amp; IMPACT ENVIRONNEMENTAL</h3>
             <div class="treatment-grid">
                 <div class="treatment-box">
-                    <div class="treatment-box-label">&#x1F4CA; Eau traitee</div>
+                    <div class="treatment-box-label">&#x1F4CA; Eau trait&#233;e (p&#233;riode)</div>
                     <div class="treatment-box-value" id="treated-water-value">--</div>
                     <div class="treatment-box-unit">m&sup3;</div>
                 </div>
                 <div class="treatment-box">
-                    <div class="treatment-box-label">&#x1F4C5; Par jour</div>
+                    <div class="treatment-box-label">&#x1F4C5; Traitement journalier</div>
                     <div class="treatment-box-value" id="treated-water-per-day">--</div>
                     <div class="treatment-box-unit">m&sup3;/jour</div>
                 </div>
                 <div class="treatment-box">
-                    <div class="treatment-box-label">&#x1F331; Emissions evitees</div>
+                    <div class="treatment-box-label">&#x1F331; CO&#x2082;e &#233;vit&#233; (p&#233;riode)</div>
                     <div class="treatment-box-value" id="co2e-avoided">--</div>
                     <div class="treatment-box-unit" id="co2e-unit">kg CO&sup2;e</div>
                 </div>
                 <div class="treatment-box">
-                    <div class="treatment-box-label">&#x2705; Reduction</div>
+                    <div class="treatment-box-label">&#x2705; R&#233;duction</div>
                     <div class="treatment-box-value" id="reduction-percent">--</div>
                     <div class="treatment-box-unit">%</div>
                 </div>
             </div>
             <div class="treatment-info">
-                &#x2139;&#xFE0F; Reduction d'emissions par rapport a une fosse standard (PRG CH&#x2084; = 28, GIEC AR5)
+                &#x2139;&#xFE0F; R&#233;duction d'&#233;missions par rapport &#224; une fosse standard (PRG CH&#x2084; = 28, GIEC AR5)
             </div>
         </div>
 
         <div class="table-container">
             <div id="loading" class="loading">
                 <div class="spinner"></div>
-                <p>Chargement des donnees...</p>
+                <p>Chargement des donn&#233;es...</p>
             </div>
 
             <div id="table-wrapper" style="display: none;">
@@ -573,9 +573,9 @@ def render_dashboard() -> str:
                             <th onclick="sortTable('device_id', 0)">Device <span class="sort-icon"></span></th>
                             <th onclick="sortTable('channel', 1)">Canal <span class="sort-icon"></span></th>
                             <th onclick="sortTable('start_time', 2)">Date <span class="sort-icon"></span></th>
-                            <th onclick="sortTable('start_time', 3)">Demarrage <span class="sort-icon"></span></th>
-                            <th onclick="sortTable('end_time', 4)">Arret <span class="sort-icon"></span></th>
-                            <th onclick="sortTable('duration_minutes', 5)">Duree <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('start_time', 3)">D&#233;marrage <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('end_time', 4)">Arr&#234;t <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('duration_minutes', 5)">Dur&#233;e <span class="sort-icon"></span></th>
                             <th onclick="sortTable('avg_power_w', 6)">Puissance moy. <span class="sort-icon"></span></th>
                             <th onclick="sortTable('avg_current_a', 7)">Courant moy. <span class="sort-icon"></span></th>
                             <th onclick="sortTable('avg_voltage_v', 8)">Voltage moy. <span class="sort-icon"></span></th>
@@ -587,7 +587,7 @@ def render_dashboard() -> str:
             </div>
 
             <div id="empty" class="empty" style="display: none;">
-                <p>Aucun cycle trouve pour cette periode</p>
+                <p>Aucun cycle trouv&#233; pour cette p&#233;riode</p>
             </div>
         </div>
     </div>
@@ -720,7 +720,7 @@ def render_dashboard() -> str:
             } catch (error) {
                 console.error('Erreur:', error);
                 document.getElementById('loading').style.display = 'none';
-                alert('Erreur lors du chargement des donnees: ' + error.message);
+                alert('Erreur lors du chargement des donn\u00e9es : ' + error.message);
             }
         }
 
@@ -909,11 +909,11 @@ def render_dashboard() -> str:
 
         function exportCSV() {
             if (!currentData || currentData.cycles.length === 0) {
-                alert('Aucune donnee a exporter');
+                alert('Aucune donn\u00e9e \u00e0 exporter');
                 return;
             }
 
-            let csv = 'Device;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Courant moyen (A);Voltage moyen (V);Statut\\n';
+            let csv = 'Device;Canal;Date;Heure d\\u00E9marrage;Heure arr\\u00EAt;Dur\\u00E9e (min);Puissance moyenne (W);Courant moyen (A);Voltage moyen (V);Statut\\n';
 
             currentData.cycles.forEach(cycle => {
                 const deviceId = cycle.device_id || 'N/A';

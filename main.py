@@ -53,19 +53,29 @@ async def root():
     return "Shelly WS collector running (simple throttling)"
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
+def html_response(content: str) -> HTMLResponse:
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache"
+        }
+    )
+
+
+@app.get("/dashboard")
 async def dashboard():
-    return render_dashboard()
+    return html_response(render_dashboard())
 
 
-@app.get("/admin", response_class=HTMLResponse)
+@app.get("/admin")
 async def admin_page():
-    return render_admin()
+    return html_response(render_admin())
 
 
-@app.get("/admin/pumps", response_class=HTMLResponse)
+@app.get("/admin/pumps")
 async def admin_pumps_page():
-    return render_pumps_admin()
+    return html_response(render_pumps_admin())
 
 
 @app.websocket("/ws")
