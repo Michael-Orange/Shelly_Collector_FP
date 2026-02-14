@@ -186,7 +186,7 @@ def render_dashboard() -> str:
         }
 
         .treatment-card {
-            background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%);
+            background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
             border-radius: 12px;
             padding: 30px;
             margin-bottom: 2rem;
