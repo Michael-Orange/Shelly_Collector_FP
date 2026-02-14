@@ -1,0 +1,159 @@
+📋 BRIEF POUR REPLIT
+═══════════════════════════════════════════════════════════════════════════════
+🎯 AJOUT : Colonne "VOLTAGE MOY." dans le tableau des cycles
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 OBJECTIF
+Ajouter une colonne "VOLTAGE MOY." affichant la tension moyenne (voltage_v) 
+pour chaque cycle, à côté de "COURANT MOY."
+
+═══════════════════════════════════════════════════════════════════════════════
+🎨 FRONTEND - TABLEAU DES CYCLES
+═══════════════════════════════════════════════════════════════════════════════
+
+A. MODIFIER L'ENTÊTE DU TABLEAU
+--------------------------------
+
+AVANT :
+```html
+<thead>
+    <tr>
+        <th>DEVICE</th>
+        <th>CANAL</th>
+        <th>DATE</th>
+        <th>DEMARRAGE</th>
+        <th>ARRET</th>
+        <th>DUREE</th>
+        <th>PUISSANCE MOY.</th>
+        <th>COURANT MOY.</th>
+        <!-- Manque VOLTAGE -->
+    </tr>
+</thead>
+APRÈS :
+<thead>
+    <tr>
+        <th>DEVICE</th>
+        <th>CANAL</th>
+        <th>DATE</th>
+        <th>DEMARRAGE</th>
+        <th>ARRET</th>
+        <th>DUREE</th>
+        <th>PUISSANCE MOY.</th>
+        <th>COURANT MOY.</th>
+        <th>VOLTAGE MOY.</th>  <!-- ✅ NOUVEAU -->
+    </tr>
+</thead>
+B. MODIFIER LE CORPS DU TABLEAU (tbody)
+Dans le JavaScript qui génère les lignes du tableau :
+AVANT :
+// Exemple hypothétique de construction de ligne
+`<td>${cycle.avg_power_w.toFixed(1)} W</td>
+ <td>${cycle.avg_ampere.toFixed(1)} A</td>`
+APRÈS :
+`<td>${cycle.avg_power_w.toFixed(1)} W</td>
+ <td>${cycle.avg_ampere.toFixed(1)} A</td>
+ <td>${cycle.voltage_v ? cycle.voltage_v.toFixed(1) : '-'} V</td>`  // ✅ NOUVEAU
+C. FORMATAGE
+Format attendu : XXX.X V (1 décimale, comme les autres valeurs)
+Exemples :
+230.5 V
+228.3 V
+231.0 V
+Si voltage_v est null ou undefined : afficher "-"
+═══════════════════════════════════════════════════════════════════════════════
+📊 ORDRE DES COLONNES RECOMMANDÉ
+═══════════════════════════════════════════════════════════════════════════════
+Position logique après COURANT MOY. car les 3 valeurs électriques sont liées :
+DEVICE
+CANAL
+DATE
+DEMARRAGE
+ARRET
+DUREE
+PUISSANCE MOY.
+COURANT MOY.
+VOLTAGE MOY. ← NOUVEAU (position 9)
+MIN/MAX AMPERES (si existant)
+MIN/MAX WATTS (si existant)
+═══════════════════════════════════════════════════════════════════════════════
+🔧 VÉRIFICATIONS BACKEND
+═══════════════════════════════════════════════════════════════════════════════
+S'assurer que voltage_v est bien présent dans la réponse API /api/pump-cycles :
+# Dans detect_cycles() ou équivalent
+cycle = {
+    "channel": channel,
+    "start_time": ...,
+    "end_time": ...,
+    "duration_minutes": ...,
+    "avg_power_w": ...,
+    "avg_ampere": ...,
+    "voltage_v": ...,  # ✅ Doit être présent
+    # ...
+}
+Si voltage_v n'est pas calculé actuellement, il faut l'ajouter en calculant
+la moyenne des mesures de tension pendant le cycle.
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+HTML :
+☐ Colonne <th>VOLTAGE MOY.</th> ajoutée dans <thead>
+☐ Colonne <td> correspondante ajoutée dans <tbody>
+☐ Position : après COURANT MOY.
+JavaScript :
+☐ cycle.voltage_v utilisé pour afficher la valeur
+☐ Format : .toFixed(1) pour 1 décimale
+☐ Gestion cas null/undefined : afficher "-"
+☐ Unité "V" ajoutée
+Backend (si nécessaire) :
+☐ voltage_v calculé dans detect_cycles()
+☐ voltage_v présent dans la réponse JSON
+☐ Valeur cohérente (généralement 230V ±10%)
+Tests visuels :
+☐ Colonne visible dans le tableau
+☐ Valeurs affichées au format XXX.X V
+☐ Alignement correct avec les autres colonnes
+☐ Scroll horizontal fonctionne (mobile)
+Tests fonctionnels :
+☐ Valeurs voltage cohérentes (220-240V typiquement)
+☐ Pas d'erreur si voltage_v manquant
+☐ Format 1 décimale respecté
+═══════════════════════════════════════════════════════════════════════════════
+📝 EXEMPLE RENDU ATTENDU
+═══════════════════════════════════════════════════════════════════════════════
+Ligne du tableau :
+┌─────────┬───────┬────────────┬─────────┬───────┬────────┬──────────┬───────────┬────────────┐
+│ DEVICE  │ CANAL │ DATE       │ DEMAR.  │ ARRET │ DURÉE  │ PUIS.MOY │ COUR.MOY  │ VOLT.MOY   │
+├─────────┼───────┼────────────┼─────────┼───────┼────────┼──────────┼───────────┼────────────┤
+│ Sagemcom│ PR1   │ 14/02/2026 │ 09h40   │ 09h45 │ 5 min  │ 1207.2 W │ 2.4 A     │ 230.5 V    │
+│ Sagemcom│ PS    │ 14/02/2026 │ 09h40   │ En cours    │ 352 min│ 422.9 W  │ 2.4 A     │ 228.3 V    │
+└─────────┴───────┴────────────┴─────────┴───────┴────────┴──────────┴───────────┴────────────┘
+═══════════════════════════════════════════════════════════════════════════════
+💡 NOTES TECHNIQUES
+═══════════════════════════════════════════════════════════════════════════════
+POURQUOI LE VOLTAGE ?
+Permet de détecter les variations de tension secteur
+Utile pour diagnostiquer problèmes électriques
+Complète le trio P = U × I (Puissance = Tension × Intensité)
+VALEURS NORMALES
+France : 230V ±10% → 207-253V acceptable
+Si voltage < 220V : Tension basse (risque pompe)
+Si voltage > 240V : Tension haute (surveiller)
+CALCUL (si nécessaire côté backend)
+Moyenne des mesures voltage pendant le cycle
+Filtrer les valeurs aberrantes (< 180V ou > 260V)
+Arrondir à 1 décimale pour l'affichage
+LARGEUR MINIMALE TABLEAU
+Ajouter ~80-100px pour la nouvelle colonne
+Ajuster min-width du .table-wrapper si nécessaire
+
+---
+
+## 🎯 RÉSUMÉ
+
+**Ajout** : Colonne "VOLTAGE MOY." après "COURANT MOY."
+
+**Format** : XXX.X V (1 décimale)
+
+**Source** : cycle.voltage_v
+
+**Position** : Entre COURANT MOY. et MIN/MAX (si existant)
