@@ -562,6 +562,7 @@ def render_dashboard() -> str:
                             <th onclick="sortTable('duration_minutes', 5)">Duree <span class="sort-icon"></span></th>
                             <th onclick="sortTable('avg_power_w', 6)">Puissance moy. <span class="sort-icon"></span></th>
                             <th onclick="sortTable('avg_current_a', 7)">Courant moy. <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('avg_voltage_v', 8)">Voltage moy. <span class="sort-icon"></span></th>
                         </tr>
                     </thead>
                     <tbody id="cycles-tbody">
@@ -762,6 +763,7 @@ def render_dashboard() -> str:
                 const durationStr = cycle.duration_minutes + ' min';
                 const powerStr = (cycle.avg_power_w != null ? parseFloat(cycle.avg_power_w).toFixed(1) : '-') + ' W';
                 const currentStr = cycle.avg_current_a ? parseFloat(cycle.avg_current_a).toFixed(1) + ' A' : '-';
+                const voltageStr = cycle.avg_voltage_v != null ? parseFloat(cycle.avg_voltage_v).toFixed(1) + ' V' : '-';
 
                 row.innerHTML =
                     deviceCell +
@@ -771,7 +773,8 @@ def render_dashboard() -> str:
                     '<td>' + endTimeStr + '</td>' +
                     '<td>' + durationStr + '</td>' +
                     '<td>' + powerStr + '</td>' +
-                    '<td>' + currentStr + '</td>';
+                    '<td>' + currentStr + '</td>' +
+                    '<td>' + voltageStr + '</td>';
 
                 tbody.appendChild(row);
             });
@@ -882,7 +885,7 @@ def render_dashboard() -> str:
                 return;
             }
 
-            let csv = 'Device;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Courant moyen (A);Statut\\n';
+            let csv = 'Device;Canal;Date;Heure demarrage;Heure arret;Duree (min);Puissance moyenne (W);Courant moyen (A);Voltage moyen (V);Statut\\n';
 
             currentData.cycles.forEach(cycle => {
                 const deviceId = cycle.device_id || 'N/A';
@@ -904,7 +907,8 @@ def render_dashboard() -> str:
 
                 var powerW = cycle.avg_power_w != null ? parseFloat(cycle.avg_power_w).toFixed(1) : '';
                 var currentA = cycle.avg_current_a ? parseFloat(cycle.avg_current_a).toFixed(1) : '';
-                csv += deviceName + ';' + channelName + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + powerW + ';' + currentA + ';' + status + '\\n';
+                var voltageV = cycle.avg_voltage_v != null ? parseFloat(cycle.avg_voltage_v).toFixed(1) : '';
+                csv += deviceName + ';' + channelName + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + powerW + ';' + currentA + ';' + voltageV + ';' + status + '\\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

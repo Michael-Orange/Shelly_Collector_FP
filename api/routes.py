@@ -42,7 +42,7 @@ async def get_pump_cycles(
             end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
 
         query = """
-            SELECT timestamp, channel, apower_w, device_id, current_a
+            SELECT timestamp, channel, apower_w, device_id, current_a, voltage_v
             FROM power_logs
             WHERE timestamp >= $1 AND timestamp <= $2
         """
@@ -63,7 +63,7 @@ async def get_pump_cycles(
 
         print(f"📊 API: Fetched {len(records)} records for cycle detection", flush=True)
 
-        records_list = [(r['timestamp'], r['channel'], r['apower_w'], r['device_id'], r['current_a']) for r in records]
+        records_list = [(r['timestamp'], r['channel'], r['apower_w'], r['device_id'], r['current_a'], r['voltage_v']) for r in records]
 
         cycles = detect_cycles(
             records_list,
