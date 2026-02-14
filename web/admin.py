@@ -125,7 +125,7 @@ def render_admin() -> str:
                             '</div>';
                         }).join('') +
                     '</div>' +
-                    '<button class="btn-save" onclick="saveDevice(\\'' + safeId + '\\', ' + JSON.stringify(device.channels) + ')">Enregistrer tout</button>' +
+                    '<button class="btn-save" data-device="' + safeId + '" data-channels="' + encodeURIComponent(JSON.stringify(device.channels)) + '" onclick="saveDevice(this.dataset.device, JSON.parse(decodeURIComponent(this.dataset.channels)))">Enregistrer tout</button>' +
                 '</div>';
             }).join('');
         }
