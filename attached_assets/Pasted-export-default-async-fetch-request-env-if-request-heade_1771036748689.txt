@@ -1,0 +1,220 @@
+export default {
+  async fetch(request, env) {
+    if (request.headers.get("Upgrade") === "websocket") {
+      return handleWebSocket(request, env);
+    }
+    return new Response("Shelly Filter Proxy - WebSocket only", { status: 200 });
+  },
+};
+
+function shouldForwardMessage(data) {
+  const channelsInclude = [0, 1, 2];
+  const powerThreshold = 10;
+
+  if (data && data.params) {
+    for (const ch of channelsInclude) {
+      const sw = data.params[`switch:${ch}`];
+      if (sw && typeof sw.apower === "number" && sw.apower > powerThreshold) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function handleWebSocket(request, env) {
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = pair[1];
+  server.accept();
+  console.log("✅ Shelly connected");
+
+  const backendUrl = "wss://shelly-collector.filtreplante.com/ws";
+
+  let backend = null;
+  let backendOpen = false;
+  let isConnecting = false;
+  let lastAttemptTime = 0;
+  let consecutiveFailures = 0;
+  const messageQueue = [];
+  const MAX_QUEUE_SIZE = 200; // Augmenté pour jours sans activité
+
+  let filteredCount = 0;
+  let forwardedCount = 0;
+
+  // Backoff exponentiel : 5s → 10s → 20s → 40s → 60s (max)
+  function getRetryDelay() {
+    const baseDelay = 5000;
+    const maxDelay = 60000; // 60 secondes max entre retries
+    return Math.min(baseDelay * Math.pow(2, Math.min(consecutiveFailures, 4)), maxDelay);
+  }
+
+  function addToQueue(message) {
+    if (messageQueue.length >= MAX_QUEUE_SIZE) {
+      messageQueue.shift();
+      if (messageQueue.length % 50 === 0) {
+        console.log(`⚠️ Queue: ${messageQueue.length}/${MAX_QUEUE_SIZE}`);
+      }
+    }
+    messageQueue.push(message);
+  }
+
+  function sendQueuedMessages() {
+    let sent = 0;
+    while (backendOpen && messageQueue.length > 0) {
+      const msg = messageQueue.shift();
+      try {
+        backend.send(msg);
+        sent++;
+      } catch (e) {
+        console.error("❌ Send queued failed:", e.message);
+        messageQueue.unshift(msg); // Remettre en tête
+        break;
+      }
+    }
+    if (sent > 0) {
+      console.log(`✅ Sent ${sent} queued messages (${messageQueue.length} remaining)`);
+    }
+  }
+
+  function ensureBackend() {
+    // Déjà connecté ou en cours
+    if (backend || isConnecting) {
+      return;
+    }
+
+    // Respecter le délai de backoff
+    const now = Date.now();
+    const requiredDelay = getRetryDelay();
+    const timeSinceLastAttempt = now - lastAttemptTime;
+    
+    if (timeSinceLastAttempt < requiredDelay) {
+      return; // Trop tôt pour retry
+    }
+
+    lastAttemptTime = now;
+    isConnecting = true;
+    
+    const attemptNum = consecutiveFailures + 1;
+    console.log(`🔄 Connection attempt #${attemptNum} (backoff: ${requiredDelay/1000}s, queue: ${messageQueue.length})`);
+
+    try {
+      backend = new WebSocket(backendUrl);
+    } catch (e) {
+      console.error(`❌ WebSocket creation failed:`, e.message);
+      isConnecting = false;
+      consecutiveFailures++;
+      return;
+    }
+
+    // Timeout GÉNÉREUX pour cold starts Replit Autoscale
+    const timeout = setTimeout(() => {
+      if (isConnecting) {
+        console.error(`⏱️ Connection timeout (90s) on attempt #${attemptNum}`);
+        isConnecting = false;
+        consecutiveFailures++;
+        if (backend) {
+          try { backend.close(); } catch {}
+          backend = null;
+        }
+      }
+    }, 90000); // 90 secondes
+
+    backend.addEventListener("open", () => {
+      clearTimeout(timeout);
+      backendOpen = true;
+      isConnecting = false;
+      const prevFailures = consecutiveFailures;
+      consecutiveFailures = 0; // Reset sur succès
+      console.log(`✅ Backend connected! (after ${prevFailures} failures)`);
+      sendQueuedMessages();
+    });
+
+    backend.addEventListener("message", (ev) => {
+      try {
+        server.send(ev.data);
+        console.log("📨 Relayed backend→Shelly");
+      } catch (e) {
+        console.error("❌ Relay failed:", e.message);
+      }
+    });
+
+    backend.addEventListener("close", (e) => {
+      clearTimeout(timeout);
+      console.log(`🔌 Backend closed: ${e.code} ${e.reason || ''}`);
+      backendOpen = false;
+      isConnecting = false;
+      backend = null;
+      consecutiveFailures++;
+    });
+
+    backend.addEventListener("error", (e) => {
+      clearTimeout(timeout);
+      console.error(`❌ Backend error`);
+      backendOpen = false;
+      isConnecting = false;
+      backend = null;
+      consecutiveFailures++;
+    });
+  }
+
+  // ✅ RETRY PÉRIODIQUE : réessaie toutes les 10s si messages en queue
+  const retryInterval = setInterval(() => {
+    if (!backendOpen && messageQueue.length > 0) {
+      ensureBackend();
+    }
+  }, 10000); // Check toutes les 10 secondes
+
+  server.addEventListener("message", (ev) => {
+    let data;
+    let text;
+    
+    try {
+      text = typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data);
+      data = JSON.parse(text);
+    } catch {
+      return;
+    }
+
+    if (!shouldForwardMessage(data)) {
+      filteredCount++;
+      if (filteredCount % 200 === 0) {
+        console.log(`🔽 ${filteredCount} messages filtered`);
+      }
+      return;
+    }
+
+    forwardedCount++;
+    if (forwardedCount % 10 === 0) {
+      console.log(`⚡ ${forwardedCount} messages to forward`);
+    }
+
+    if (backendOpen) {
+      try {
+        backend.send(text);
+      } catch (e) {
+        console.error("❌ Send failed:", e.message);
+        addToQueue(text);
+      }
+    } else {
+      addToQueue(text);
+      ensureBackend(); // Tente de se connecter
+    }
+  });
+
+  server.addEventListener("close", () => {
+    clearInterval(retryInterval);
+    console.log(`👋 Shelly disconnected - Filtered: ${filteredCount}, Forwarded: ${forwardedCount}, Queued: ${messageQueue.length}`);
+    if (backend) {
+      try { backend.close(); } catch {}
+      backend = null;
+    }
+    messageQueue.length = 0;
+  });
+
+  server.addEventListener("error", (e) => {
+    console.error("❌ Shelly WS error");
+  });
+
+  return new Response(null, { status: 101, webSocket: client });
+}

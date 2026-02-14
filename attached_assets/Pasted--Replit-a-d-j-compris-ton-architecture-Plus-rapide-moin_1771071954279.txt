@@ -1,0 +1,51 @@
+✅ Replit a déjà compris ton architecture
+✅ Plus rapide, moins de texte à traiter
+✅ Mais il faut quand même lui donner les détails critiques
+📋 CE QUE TU DOIS DIRE À REPLIT
+Message court et précis :
+OK pour ces adaptations. Voici les specs précises :
+
+📊 TABLE pump_models (PostgreSQL) :
+```sql
+CREATE TABLE IF NOT EXISTS pump_models (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  power_kw REAL NOT NULL,
+  current_ampere REAL NOT NULL,
+  flow_rate_hmt8 REAL NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO pump_models (id, name, power_kw, current_ampere, flow_rate_hmt8) 
+VALUES 
+  (1, 'Pedrollo VXM 10/35', 0.75, 4.8, 18.0),
+  (2, 'Pedrollo DM/8', 0.55, 3.2, NULL)
+ON CONFLICT (id) DO NOTHING;
+📊 MODIFIER device_config :
+ALTER TABLE device_config ADD COLUMN IF NOT EXISTS pump_model_id INTEGER REFERENCES pump_models(id);
+🎨 UX/UI :
+Page /admin : Ajouter lien "🔧 Gérer les modèles de pompes" → /admin/pumps
+Pour chaque channel : ajouter <select> avec modèles (format : "Nom (X kW, Y A, Z m³/h)")
+UN SEUL bouton "Enregistrer" qui update tous les channels en une requête (transaction)
+Page /admin/pumps : CRUD complet (créer, modifier, supprimer avec vérification d'utilisation)
+🔧 LOGIQUE MÉTIER :
+Suppression bloquée si pump_model utilisé par un channel
+Transaction BEGIN/COMMIT pour update device (rollback si erreur)
+GET /api/config/devices doit faire JOIN avec pump_models pour retourner les infos complètes
+Build ça maintenant.
+
+---
+
+## 🎯 POURQUOI CE FORMAT ?
+
+### **Avantages** :
+1. ✅ **Confirme les adaptations** (PostgreSQL, services, routes)
+2. ✅ **Donne les specs exactes** (structure tables, données)
+3. ✅ **Précise l'UX/UI** (un bouton, format affichage)
+4. ✅ **Spécifie la logique** (transaction, validation)
+5. ✅ **Court et actionnable** (Replit peut démarrer tout de suite)
+
+### **vs Brief complet** :
+- ❌ Trop long (Replit doit traiter beaucoup de texte)
+- ❌ Redondant (architecture déjà comprise)
+- ⚠️ Risque de confusion avec du code exemple trop détaillé

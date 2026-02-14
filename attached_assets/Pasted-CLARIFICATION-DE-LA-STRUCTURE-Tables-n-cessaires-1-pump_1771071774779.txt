@@ -1,0 +1,593 @@
+CLARIFICATION DE LA STRUCTURE
+Tables nécessaires :
+1️⃣ pump_models (nouvelle table - catalogue de référence)
+CREATE TABLE pump_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  power_kw REAL NOT NULL,
+  current_ampere REAL NOT NULL,
+  flow_rate_hmt8 REAL NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+→ Contient les modèles de référence (Pedrollo VXM 10/35, DM/8, etc.)
+2️⃣ device_config (table existante - à modifier)
+-- Structure actuelle (probable) :
+device_id TEXT
+channel TEXT
+name TEXT
+
+-- À ajouter :
++ pump_model_id INTEGER REFERENCES pump_models(id)
+→ Lie chaque channel d'un device à un modèle de pompe
+📋 BRIEF ADAPTÉ À TON ARCHITECTURE
+═══════════════════════════════════════════════════════════
+🎯 BRIEF FONCTIONNEL : Gestion des modèles de pompes
+═══════════════════════════════════════════════════════════
+
+📌 OBJECTIF
+1. Créer un catalogue de modèles de pompes (table pump_models)
+2. Permettre la sélection du modèle depuis /admin
+3. Ajouter une page /admin/pumps pour gérer les modèles (CRUD)
+
+⚠️ ARCHITECTURE ACTUELLE À RESPECTER
+- CSS et JavaScript INLINE dans les fonctions render_*()
+- Table device_config existante (à modifier)
+- Pattern de rendu similaire à render_dashboard() et render_admin()
+
+═══════════════════════════════════════════════════════════
+📊 STRUCTURE DE DONNÉES
+═══════════════════════════════════════════════════════════
+
+1️⃣ NOUVELLE TABLE : pump_models
+----------------------------------
+```sql
+CREATE TABLE IF NOT EXISTS pump_models (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  power_kw REAL NOT NULL,
+  current_ampere REAL NOT NULL,
+  flow_rate_hmt8 REAL NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+Données initiales (à insérer au démarrage) :
+INSERT OR IGNORE INTO pump_models (id, name, power_kw, current_ampere, flow_rate_hmt8) 
+VALUES 
+  (1, 'Pedrollo VXM 10/35', 0.75, 4.8, 18.0),
+  (2, 'Pedrollo DM/8', 0.55, 3.2, NULL);
+2️⃣ MODIFIER TABLE EXISTANTE : device_config
+ALTER TABLE device_config ADD COLUMN pump_model_id INTEGER;
+Structure finale de device_config :
+device_id (TEXT)
+channel (TEXT)
+name (TEXT) ← Nom custom du channel (ex: "PR1", "PS")
+pump_model_id (INTEGER NULL) ← Lien vers pump_models
+═══════════════════════════════════════════════════════════
+🔧 BACKEND (FastAPI)
+═══════════════════════════════════════════════════════════
+1️⃣ ENDPOINT : GET /api/config/pump-models
+Retourne la liste de tous les modèles de pompes.
+@app.get("/api/config/pump-models")
+async def get_pump_models():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, name, power_kw, current_ampere, flow_rate_hmt8
+        FROM pump_models
+        ORDER BY name
+    """)
+    models = []
+    for row in cursor.fetchall():
+        models.append({
+            "id": row[0],
+            "name": row[1],
+            "power_kw": row[2],
+            "current_ampere": row[3],
+            "flow_rate_hmt8": row[4]
+        })
+    return models
+2️⃣ ENDPOINT : POST /api/config/pump-model
+Crée un nouveau modèle de pompe.
+@app.post("/api/config/pump-model")
+async def create_pump_model(data: dict):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO pump_models (name, power_kw, current_ampere, flow_rate_hmt8)
+        VALUES (?, ?, ?, ?)
+    """, (
+        data["name"],
+        data["power_kw"],
+        data["current_ampere"],
+        data.get("flow_rate_hmt8")
+    ))
+    conn.commit()
+    return {"success": True, "pump_model_id": cursor.lastrowid}
+3️⃣ ENDPOINT : PUT /api/config/pump-model/{id}
+Modifie un modèle existant.
+@app.put("/api/config/pump-model/{pump_id}")
+async def update_pump_model(pump_id: int, data: dict):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE pump_models 
+        SET name = ?, power_kw = ?, current_ampere = ?, flow_rate_hmt8 = ?
+        WHERE id = ?
+    """, (
+        data["name"],
+        data["power_kw"],
+        data["current_ampere"],
+        data.get("flow_rate_hmt8"),
+        pump_id
+    ))
+    conn.commit()
+    return {"success": True}
+4️⃣ ENDPOINT : DELETE /api/config/pump-model/{id}
+Supprime un modèle (avec vérification d'utilisation).
+@app.delete("/api/config/pump-model/{pump_id}")
+async def delete_pump_model(pump_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Vérifier si le modèle est utilisé
+    cursor.execute("""
+        SELECT COUNT(*) FROM device_config 
+        WHERE pump_model_id = ?
+    """, (pump_id,))
+    count = cursor.fetchone()[0]
+    
+    if count > 0:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": f"Cannot delete: pump model is used by {count} channel(s)"}
+        )
+    
+    cursor.execute("DELETE FROM pump_models WHERE id = ?", (pump_id,))
+    conn.commit()
+    return {"success": True}
+5️⃣ MODIFIER ENDPOINT : POST /api/config/device
+Adapter pour gérer pump_model_id.
+Actuellement (probable) :
+@app.post("/api/config/device")
+async def update_device_config(data: dict):
+    # Update device_name
+    # Update channel names one by one
+Nouveau :
+@app.post("/api/config/device")
+async def update_device_config(data: dict):
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("BEGIN")
+        
+        # Update device name (si applicable)
+        # ... ton code existant
+        
+        # Update tous les channels
+        for ch in data["channels"]:
+            cursor.execute("""
+                INSERT OR REPLACE INTO device_config 
+                (device_id, channel, name, pump_model_id)
+                VALUES (?, ?, ?, ?)
+            """, (
+                data["device_id"],
+                ch["channel"],
+                ch["name"],
+                ch.get("pump_model_id")
+            ))
+        
+        cursor.execute("COMMIT")
+        return {"success": True}
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        raise e
+6️⃣ MODIFIER ENDPOINT : GET /api/config/devices
+Retourner les infos pump_model pour chaque channel.
+@app.get("/api/config/devices")
+async def get_devices_config():
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Ton code existant qui récupère les channels
+    # Modifier pour joindre pump_models
+    
+    cursor.execute("""
+        SELECT 
+            dc.device_id,
+            dc.channel,
+            dc.name,
+            dc.pump_model_id,
+            pm.name as pump_name,
+            pm.power_kw,
+            pm.current_ampere,
+            pm.flow_rate_hmt8
+        FROM device_config dc
+        LEFT JOIN pump_models pm ON dc.pump_model_id = pm.id
+    """)
+    
+    # Construire la réponse avec pump_model inclus
+    # ... ton code de formatage
+═══════════════════════════════════════════════════════════
+🎨 FRONTEND - PAGE 1 : /admin (Modifier render_admin())
+═══════════════════════════════════════════════════════════
+Ajouter dans la fonction render_admin() :
+1️⃣ LIEN VERS GESTION DES POMPES (en haut de page)
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+    <h1>Configuration des devices</h1>
+    <a href="/admin/pumps" style="padding: 10px 20px; background: #007bff; color: white; 
+       text-decoration: none; border-radius: 4px; font-weight: bold;">
+        🔧 Gérer les modèles de pompes
+    </a>
+</div>
+2️⃣ AJOUTER SELECT POUR CHAQUE CHANNEL
+Pour chaque channel (switch:0, switch:1, switch:2), ajouter :
+<div style="display: flex; gap: 10px; margin-bottom: 15px;">
+    <label style="width: 120px; font-weight: bold;">switch:0:</label>
+    <input type="text" id="ch0-name" value="PR1" 
+           style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+    <select id="ch0-model" 
+            style="flex: 2; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="">-- Aucun modèle --</option>
+        <!-- Rempli dynamiquement -->
+    </select>
+</div>
+3️⃣ JAVASCRIPT INLINE (dans render_admin())
+<script>
+let pumpModels = [];
+
+// Charger les modèles au chargement de la page
+async function loadPumpModels() {
+    const response = await fetch('/api/config/pump-models');
+    pumpModels = await response.json();
+    
+    // Populate tous les selects
+    ['ch0-model', 'ch1-model', 'ch2-model'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        pumpModels.forEach(pump => {
+            const flowInfo = pump.flow_rate_hmt8 
+                ? `, ${pump.flow_rate_hmt8} m³/h` 
+                : '';
+            const option = document.createElement('option');
+            option.value = pump.id;
+            option.textContent = `${pump.name} (${pump.power_kw} kW, ${pump.current_ampere} A${flowInfo})`;
+            select.appendChild(option);
+        });
+    });
+    
+    // Puis charger la config actuelle
+    loadCurrentConfig();
+}
+
+async function loadCurrentConfig() {
+    const response = await fetch('/api/config/devices');
+    const devices = await response.json();
+    // Pré-sélectionner les modèles actuels
+    // ... ton code existant adapté
+}
+
+async function saveDeviceConfig(deviceId) {
+    const channels = [
+        {
+            channel: 'switch:0',
+            name: document.getElementById('ch0-name').value,
+            pump_model_id: document.getElementById('ch0-model').value || null
+        },
+        {
+            channel: 'switch:1',
+            name: document.getElementById('ch1-name').value,
+            pump_model_id: document.getElementById('ch1-model').value || null
+        },
+        {
+            channel: 'switch:2',
+            name: document.getElementById('ch2-name').value,
+            pump_model_id: document.getElementById('ch2-model').value || null
+        }
+    ];
+    
+    const response = await fetch('/api/config/device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            device_id: deviceId,
+            device_name: document.getElementById('device-name').value,
+            channels: channels
+        })
+    });
+    
+    if (response.ok) {
+        alert('Configuration enregistrée avec succès !');
+    }
+}
+
+// Charger au démarrage
+document.addEventListener('DOMContentLoaded', loadPumpModels);
+</script>
+═══════════════════════════════════════════════════════════
+🎨 FRONTEND - PAGE 2 : /admin/pumps (Nouvelle fonction render_pumps())
+═══════════════════════════════════════════════════════════
+Créer une nouvelle fonction similaire à render_admin() :
+@app.get("/admin/pumps")
+async def render_admin_pumps():
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Gestion des modèles de pompes</title>
+        <style>
+            /* Réutiliser les styles de ton admin existant */
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: #f5f5f5;
+            }}
+            .container {{
+                max-width: 1200px;
+                margin: 0 auto;
+            }}
+            .btn-back {{
+                padding: 10px 20px;
+                background: #6c757d;
+                color: white;
+                text-decoration: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            .pump-form-card {{
+                background: white;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                margin-bottom: 30px;
+            }}
+            .form-row {{
+                margin-bottom: 20px;
+            }}
+            .form-row label {{
+                display: block;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }}
+            .form-row input {{
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                background: white;
+            }}
+            th, td {{
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }}
+            th {{
+                background: #f8f9fa;
+                font-weight: bold;
+            }}
+            .btn-primary {{
+                padding: 12px 30px;
+                background: #28a745;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }}
+            .btn-edit {{
+                padding: 6px 12px;
+                background: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }}
+            .btn-delete {{
+                padding: 6px 12px;
+                background: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div style="display: flex; align-items: center; gap: 20px; margin-bottom: 30px;">
+                <a href="/admin" class="btn-back">← Retour à l'admin</a>
+                <h1>Gestion des modèles de pompes</h1>
+            </div>
+
+            <div class="pump-form-card">
+                <h2 id="form-title">Ajouter un nouveau modèle</h2>
+                <form id="pump-form" onsubmit="handleSubmit(event)">
+                    <input type="hidden" id="pump-id">
+                    
+                    <div class="form-row">
+                        <label>Nom du modèle *</label>
+                        <input type="text" id="pump-name" required placeholder="Ex: Pedrollo VXM 10/35">
+                    </div>
+                    
+                    <div class="form-row">
+                        <label>Puissance (kW) *</label>
+                        <input type="number" id="pump-power" step="0.01" min="0" required placeholder="Ex: 0.75">
+                    </div>
+                    
+                    <div class="form-row">
+                        <label>Intensité à 230V (A) *</label>
+                        <input type="number" id="pump-current" step="0.1" min="0" required placeholder="Ex: 4.8">
+                    </div>
+                    
+                    <div class="form-row">
+                        <label>Débit à HMT=8 (m³/h)</label>
+                        <input type="number" id="pump-flow" step="0.1" min="0" placeholder="Laisser vide si N/A">
+                    </div>
+                    
+                    <button type="submit" class="btn-primary">Enregistrer</button>
+                    <button type="button" class="btn-cancel" onclick="resetForm()">Annuler</button>
+                </form>
+            </div>
+
+            <div class="pump-form-card">
+                <h2>Modèles existants</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nom</th>
+                            <th>Puissance (kW)</th>
+                            <th>Intensité (A)</th>
+                            <th>Débit (m³/h)</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pumps-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <script>
+            let pumps = [];
+
+            async function loadPumps() {{
+                const response = await fetch('/api/config/pump-models');
+                pumps = await response.json();
+                renderTable();
+            }}
+
+            function renderTable() {{
+                const tbody = document.getElementById('pumps-tbody');
+                if (pumps.length === 0) {{
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">Aucun modèle</td></tr>';
+                    return;
+                }}
+                tbody.innerHTML = pumps.map(pump => `
+                    <tr>
+                        <td>${{pump.name}}</td>
+                        <td>${{pump.power_kw}}</td>
+                        <td>${{pump.current_ampere}}</td>
+                        <td>${{pump.flow_rate_hmt8 || '-'}}</td>
+                        <td>
+                            <button class="btn-edit" onclick="editPump(${{pump.id}})">✏️ Modifier</button>
+                            <button class="btn-delete" onclick="deletePump(${{pump.id}})">🗑️ Supprimer</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }}
+
+            async function handleSubmit(e) {{
+                e.preventDefault();
+                const pumpId = document.getElementById('pump-id').value;
+                const data = {{
+                    name: document.getElementById('pump-name').value,
+                    power_kw: parseFloat(document.getElementById('pump-power').value),
+                    current_ampere: parseFloat(document.getElementById('pump-current').value),
+                    flow_rate_hmt8: document.getElementById('pump-flow').value 
+                        ? parseFloat(document.getElementById('pump-flow').value) 
+                        : null
+                }};
+                
+                let response;
+                if (pumpId) {{
+                    response = await fetch(`/api/config/pump-model/${{pumpId}}`, {{
+                        method: 'PUT',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(data)
+                    }});
+                }} else {{
+                    response = await fetch('/api/config/pump-model', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(data)
+                    }});
+                }}
+                
+                if (response.ok) {{
+                    alert(pumpId ? 'Modèle modifié !' : 'Modèle créé !');
+                    resetForm();
+                    loadPumps();
+                }}
+            }}
+
+            function editPump(id) {{
+                const pump = pumps.find(p => p.id === id);
+                document.getElementById('form-title').textContent = 'Modifier le modèle';
+                document.getElementById('pump-id').value = pump.id;
+                document.getElementById('pump-name').value = pump.name;
+                document.getElementById('pump-power').value = pump.power_kw;
+                document.getElementById('pump-current').value = pump.current_ampere;
+                document.getElementById('pump-flow').value = pump.flow_rate_hmt8 || '';
+            }}
+
+            async function deletePump(id) {{
+                if (!confirm('Supprimer ce modèle ?')) return;
+                const response = await fetch(`/api/config/pump-model/${{id}}`, {{
+                    method: 'DELETE'
+                }});
+                if (response.ok) {{
+                    alert('Modèle supprimé !');
+                    loadPumps();
+                }} else {{
+                    const error = await response.json();
+                    alert('Erreur : ' + error.error);
+                }}
+            }}
+
+            function resetForm() {{
+                document.getElementById('form-title').textContent = 'Ajouter un nouveau modèle';
+                document.getElementById('pump-id').value = '';
+                document.getElementById('pump-form').reset();
+            }}
+
+            loadPumps();
+        </script>
+    </body>
+    </html>
+    """)
+═══════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════
+Base de données :
+☐ Table pump_models créée
+☐ Données initiales insérées (Pedrollo VXM 10/35, DM/8)
+☐ Colonne pump_model_id ajoutée à device_config
+Backend :
+☐ GET /api/config/pump-models
+☐ POST /api/config/pump-model
+☐ PUT /api/config/pump-model/{id}
+☐ DELETE /api/config/pump-model/{id} (avec vérification)
+☐ POST /api/config/device modifié (gère pump_model_id)
+☐ GET /api/config/devices modifié (JOIN pump_models)
+Frontend :
+☐ /admin : Lien vers /admin/pumps
+☐ /admin : Select pour chaque channel
+☐ /admin : UN SEUL bouton Enregistrer
+☐ /admin/pumps : Page complète avec CRUD
+☐ /admin/pumps : Création/modification/suppression fonctionnelle
+Tests :
+☐ Créer un nouveau modèle → Visible dans /admin
+☐ Modifier un modèle → Changements visibles
+☐ Supprimer un modèle utilisé → Erreur
+☐ Supprimer un modèle non utilisé → OK
+☐ Sélectionner un modèle dans /admin → Enregistrement OK
+
+---
+
+## 🎯 RÉSUMÉ ADAPTÉ
+
+### **Tables** :
+- ✅ `pump_models` (nouvelle) → Catalogue des modèles
+- ✅ `device_config` (existante + colonne `pump_model_id`)
+
+### **Pattern suivi** :
+- ✅ CSS/JS inline dans render_admin() et render_pumps()
+- ✅ Pas de fichiers statiques séparés
+- ✅ Structure similaire à ton code existant
+
+### **Pages** :
+- ✅ `/admin` → Sélection modèles + lien vers gestion
+- ✅ `/admin/pumps` → CRUD complet (nouvelle page)
