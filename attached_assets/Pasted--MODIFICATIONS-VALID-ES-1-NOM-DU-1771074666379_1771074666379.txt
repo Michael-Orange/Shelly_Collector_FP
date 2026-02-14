@@ -1,0 +1,73 @@
+🎯 MODIFICATIONS VALIDÉES
+═══════════════════════════════════════════════════════════
+
+1️⃣ NOM DU CHAMP : "Débit effectif (m³/h)" ✅
+
+2️⃣ FORMAT MENU DÉROULANT : "18 m³/h si HMT 8" ✅
+
+📋 FORMAT D'AFFICHAGE DANS LES SELECTS
+---------------------------------------
+Modifier la fonction formatPumpOption() dans /admin :
+
+```javascript
+function formatPumpOption(pump) {
+  let info = `${pump.name} (${pump.power_kw} kW, ${pump.current_ampere} A`;
+  
+  if (pump.flow_rate_hmt8) {
+    info += `, ${pump.flow_rate_hmt8} m³/h si HMT 8`;
+  }
+  
+  info += ')';
+  return info;
+}
+Exemples de rendu :
+Avec débit : "Pedrollo VXM 10/35 (0.75 kW, 4.8 A, 18 m³/h si HMT 8)"
+Sans débit : "Pedrollo DM/8 (0.55 kW, 3.2 A)"
+🎨 LABEL DU CHAMP FLOW_RATE
+Modifier le label dans l'entête des colonnes :
+<!-- Entêtes des colonnes -->
+<div style="display: flex; gap: 10px; margin-bottom: 5px; font-size: 12px; color: #666;">
+    <div style="width: 100px;"></div>
+    <div style="flex: 1;">Nom</div>
+    <div style="flex: 3;">Modèle</div>
+    <div style="width: 90px;">HMT (m)</div>
+    <div style="width: 130px;">Débit effectif (m³/h)</div>
+</div>
+Modifier le champ input :
+<input type="number" id="ch0-flow" step="0.1" min="0" 
+       placeholder="Débit effectif"
+       title="Débit effectif de cette installation (m³/h)"
+       style="width: 130px; padding: 8px;">
+✅ RÉSUMÉ DES CHANGEMENTS
+☐ Format select : "X m³/h si HMT 8" (au lieu de "@ HMT 8m")
+☐ Label champ : "Débit effectif (m³/h)"
+☐ Placeholder input : "Débit effectif"
+☐ Width input : 130px (pour accommoder le label plus long)
+📝 EXEMPLE FINAL
+Menu déroulant affiche :
+-- Aucun modèle --
+Pedrollo VXM 10/35 (0.75 kW, 4.8 A, 18 m³/h si HMT 8)
+Pedrollo DM/8 (0.55 kW, 3.2 A)
+Configuration ligne :
+switch:0  [PR1]  [Pedrollo VXM 10/35 (...) ▼]  [6]  [22]
+          Nom     Modèle                        HMT  Débit effectif
+
+---
+
+## 🎯 MODIFICATIONS EXACTES
+
+### **1. JavaScript - Format du select** :
+```javascript
+// AVANT
+`, ${pump.flow_rate_hmt8} m³/h @ HMT 8m`
+
+// MAINTENANT
+`, ${pump.flow_rate_hmt8} m³/h si HMT 8`
+2. Label du champ :
+<!-- Entête colonne -->
+<div style="width: 130px;">Débit effectif (m³/h)</div>
+
+<!-- Input -->
+<input placeholder="Débit effectif" 
+       title="Débit effectif de cette installation (m³/h)"
+       style="width: 130px;">

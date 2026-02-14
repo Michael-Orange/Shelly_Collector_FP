@@ -1,0 +1,421 @@
+BRIEF COMPLET : Ajout champ "Débit effectif"
+═══════════════════════════════════════════════════════════
+
+📌 OBJECTIF
+Ajouter un champ "Débit effectif (m³/h)" dans la configuration de chaque channel,
+permettant de saisir le débit réel mesuré ou calculé pour l'installation spécifique.
+
+═══════════════════════════════════════════════════════════
+📊 BASE DE DONNÉES
+═══════════════════════════════════════════════════════════
+
+MODIFICATION TABLE device_config
+---------------------------------
+Ajouter colonne flow_rate :
+
+```sql
+ALTER TABLE device_config ADD COLUMN IF NOT EXISTS flow_rate REAL NULL;
+Structure finale de device_config :
+device_id (TEXT)
+channel (TEXT)
+name (TEXT) ← Ex: "PR1"
+pump_model_id (INTEGER) ← Modèle de pompe
+hmt (REAL) ← HMT de cette installation (défaut 8)
+flow_rate (REAL NULL) ← NOUVEAU : Débit effectif de cette installation
+═══════════════════════════════════════════════════════════
+🔧 BACKEND - SERVICE (config_service.py)
+═══════════════════════════════════════════════════════════
+1️⃣ Modifier update_device_config()
+def update_device_config(conn, data):
+    cursor = conn.cursor()
+    
+    try:
+        # Validation des données
+        for ch in data["channels"]:
+            # Valider HMT
+            if ch.get("hmt") is not None:
+                try:
+                    hmt = float(ch["hmt"])
+                    if hmt < 0:
+                        raise ValueError(f"HMT doit être positif pour {ch['channel']}")
+                except (ValueError, TypeError):
+                    raise ValueError(f"HMT invalide pour {ch['channel']}: {ch.get('hmt')}")
+            
+            # Valider flow_rate (débit effectif)
+            if ch.get("flow_rate") is not None and ch.get("flow_rate") != "":
+                try:
+                    flow_rate = float(ch["flow_rate"])
+                    if flow_rate < 0:
+                        raise ValueError(f"Débit effectif doit être positif pour {ch['channel']}")
+                except (ValueError, TypeError):
+                    raise ValueError(f"Débit effectif invalide pour {ch['channel']}: {ch.get('flow_rate')}")
+        
+        # Insertion si validation OK
+        cursor.execute("BEGIN")
+        
+        for ch in data["channels"]:
+            cursor.execute("""
+                INSERT INTO device_config (device_id, channel, name, pump_model_id, hmt, flow_rate)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (device_id, channel) 
+                DO UPDATE SET name = $3, pump_model_id = $4, hmt = $5, flow_rate = $6
+            """, (
+                data["device_id"],
+                ch["channel"],
+                ch["name"],
+                ch.get("pump_model_id"),
+                float(ch["hmt"]) if ch.get("hmt") else 8,
+                float(ch["flow_rate"]) if ch.get("flow_rate") else None
+            ))
+        
+        cursor.execute("COMMIT")
+        
+    except ValueError as e:
+        cursor.execute("ROLLBACK")
+        raise e
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        raise e
+2️⃣ Modifier get_devices_config()
+Ajouter flow_rate dans le SELECT et la réponse :
+def get_devices_config(conn):
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT 
+            dc.device_id,
+            dc.channel,
+            dc.name,
+            dc.pump_model_id,
+            dc.hmt,
+            dc.flow_rate,
+            pm.name as pump_name,
+            pm.power_kw,
+            pm.current_ampere,
+            pm.flow_rate_hmt8
+        FROM device_config dc
+        LEFT JOIN pump_models pm ON dc.pump_model_id = pm.id
+        ORDER BY dc.device_id, dc.channel
+    """)
+    
+    devices = {}
+    for row in cursor.fetchall():
+        device_id = row[0]
+        if device_id not in devices:
+            devices[device_id] = {
+                "device_id": device_id,
+                "device_name": "...",  # À adapter selon ton code existant
+                "channels": []
+            }
+        
+        channel_info = {
+            "channel": row[1],
+            "name": row[2],
+            "pump_model_id": row[3],
+            "hmt": row[4],
+            "flow_rate": row[5]  # NOUVEAU
+        }
+        
+        if row[3]:  # Si pump_model_id existe
+            channel_info["pump_model"] = {
+                "id": row[3],
+                "name": row[6],
+                "power_kw": row[7],
+                "current_ampere": row[8],
+                "flow_rate_hmt8": row[9]
+            }
+        
+        devices[device_id]["channels"].append(channel_info)
+    
+    return list(devices.values())
+═══════════════════════════════════════════════════════════
+🔧 BACKEND - ROUTES (api/routes.py)
+═══════════════════════════════════════════════════════════
+Modifier la gestion des erreurs pour update_device_config :
+@app.post("/api/config/device")
+async def update_device_config(data: dict):
+    conn = get_db_connection()
+    try:
+        config_service.update_device_config(conn, data)
+        return {"success": True, "message": "Configuration enregistrée"}
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": str(e)}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": "Erreur serveur"}
+        )
+    finally:
+        conn.close()
+═══════════════════════════════════════════════════════════
+🎨 FRONTEND - PAGE /admin (web/admin.py)
+═══════════════════════════════════════════════════════════
+1️⃣ MODIFIER render_admin() : HTML
+Ajouter entêtes de colonnes ET champs flow_rate :
+<!-- Style pour champs invalides -->
+<style>
+    .invalid-input {
+        border: 2px solid #dc3545 !important;
+        background-color: #fff5f5 !important;
+    }
+</style>
+
+<!-- Entêtes des colonnes (au-dessus de la première ligne de channels) -->
+<div style="display: flex; gap: 10px; margin-bottom: 5px; font-size: 12px; color: #666; font-weight: bold;">
+    <div style="width: 100px;"></div>
+    <div style="flex: 1;">Nom</div>
+    <div style="flex: 3;">Modèle</div>
+    <div style="width: 90px; text-align: center;">HMT (m)</div>
+    <div style="width: 130px; text-align: center;">Débit effectif (m³/h)</div>
+</div>
+
+<!-- Channel switch:0 -->
+<div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+    <label style="width: 100px; font-weight: bold;">switch:0:</label>
+    
+    <input type="text" id="ch0-name" value="PR1" 
+           style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+    
+    <select id="ch0-model" 
+            style="flex: 3; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <option value="">-- Aucun modèle --</option>
+    </select>
+    
+    <input type="number" id="ch0-hmt" value="8" step="0.5" min="0" 
+           placeholder="HMT"
+           style="width: 90px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+    
+    <input type="number" id="ch0-flow" step="0.1" min="0" 
+           placeholder="Débit effectif"
+           title="Débit effectif de cette installation (m³/h)"
+           style="width: 130px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+</div>
+
+<!-- Répéter pour switch:1 et switch:2 -->
+
+<button class="btn-save" onclick="saveDeviceConfig('shellypro4pm-...')">
+    Enregistrer
+</button>
+2️⃣ MODIFIER render_admin() : JAVASCRIPT
+<script>
+let pumpModels = [];
+
+// Format des options du select (avec "si HMT 8")
+function formatPumpOption(pump) {
+  let info = `${pump.name} (${pump.power_kw} kW, ${pump.current_ampere} A`;
+  
+  if (pump.flow_rate_hmt8) {
+    info += `, ${pump.flow_rate_hmt8} m³/h si HMT 8`;
+  }
+  
+  info += ')';
+  return info;
+}
+
+// Charger les modèles de pompes
+async function loadPumpModels() {
+    const response = await fetch('/api/config/pump-models');
+    pumpModels = await response.json();
+    
+    ['ch0-model', 'ch1-model', 'ch2-model'].forEach(selectId => {
+        const select = document.getElementById(selectId);
+        pumpModels.forEach(pump => {
+            const option = document.createElement('option');
+            option.value = pump.id;
+            option.textContent = formatPumpOption(pump);
+            select.appendChild(option);
+        });
+    });
+    
+    loadCurrentConfig();
+}
+
+// Charger la configuration actuelle
+async function loadCurrentConfig() {
+    const response = await fetch('/api/config/devices');
+    const devices = await response.json();
+    
+    devices.forEach(device => {
+        // Update device name
+        // ... ton code existant
+        
+        device.channels.forEach((ch, idx) => {
+            document.getElementById(`ch${idx}-name`).value = ch.name;
+            
+            if (ch.pump_model_id) {
+                document.getElementById(`ch${idx}-model`).value = ch.pump_model_id;
+            }
+            
+            if (ch.hmt) {
+                document.getElementById(`ch${idx}-hmt`).value = ch.hmt;
+            }
+            
+            // NOUVEAU : Débit effectif
+            if (ch.flow_rate) {
+                document.getElementById(`ch${idx}-flow`).value = ch.flow_rate;
+            }
+        });
+    });
+}
+
+// Validation d'un champ numérique
+function validateNumericInput(inputId, fieldName) {
+    const input = document.getElementById(inputId);
+    const value = input.value;
+    
+    if (value !== '' && isNaN(parseFloat(value))) {
+        input.classList.add('invalid-input');
+        return false;
+    } else {
+        input.classList.remove('invalid-input');
+        return true;
+    }
+}
+
+// Sauvegarde de la configuration
+async function saveDeviceConfig(deviceId) {
+    // Récupérer les valeurs
+    const channels = [
+        {
+            channel: 'switch:0',
+            name: document.getElementById('ch0-name').value,
+            pump_model_id: document.getElementById('ch0-model').value || null,
+            hmt: document.getElementById('ch0-hmt').value,
+            flow_rate: document.getElementById('ch0-flow').value
+        },
+        {
+            channel: 'switch:1',
+            name: document.getElementById('ch1-name').value,
+            pump_model_id: document.getElementById('ch1-model').value || null,
+            hmt: document.getElementById('ch1-hmt').value,
+            flow_rate: document.getElementById('ch1-flow').value
+        },
+        {
+            channel: 'switch:2',
+            name: document.getElementById('ch2-name').value,
+            pump_model_id: document.getElementById('ch2-model').value || null,
+            hmt: document.getElementById('ch2-hmt').value,
+            flow_rate: document.getElementById('ch2-flow').value
+        }
+    ];
+    
+    // VALIDATION
+    for (let i = 0; i < channels.length; i++) {
+        const ch = channels[i];
+        const channelName = ch.name || `switch:${i}`;
+        
+        // Valider HMT
+        if (ch.hmt !== '' && isNaN(parseFloat(ch.hmt))) {
+            alert(`❌ Erreur : HMT du channel "${channelName}" doit être un nombre valide`);
+            document.getElementById(`ch${i}-hmt`).focus();
+            document.getElementById(`ch${i}-hmt`).classList.add('invalid-input');
+            return;
+        }
+        
+        // Valider Débit effectif
+        if (ch.flow_rate !== '' && isNaN(parseFloat(ch.flow_rate))) {
+            alert(`❌ Erreur : Débit effectif du channel "${channelName}" doit être un nombre valide`);
+            document.getElementById(`ch${i}-flow`).focus();
+            document.getElementById(`ch${i}-flow`).classList.add('invalid-input');
+            return;
+        }
+        
+        // Convertir en nombre ou null
+        ch.hmt = ch.hmt === '' ? 8 : parseFloat(ch.hmt);
+        ch.flow_rate = ch.flow_rate === '' ? null : parseFloat(ch.flow_rate);
+    }
+    
+    // Envoi
+    const response = await fetch('/api/config/device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            device_id: deviceId,
+            device_name: document.getElementById('device-name').value,
+            channels: channels
+        })
+    });
+    
+    if (response.ok) {
+        alert('✅ Configuration enregistrée avec succès !');
+    } else {
+        const error = await response.json();
+        alert('❌ Erreur : ' + (error.error || 'Erreur inconnue'));
+    }
+}
+
+// Validation temps réel
+document.addEventListener('DOMContentLoaded', function() {
+    loadPumpModels();
+    
+    // Ajouter écouteurs pour validation temps réel
+    for (let i = 0; i < 3; i++) {
+        document.getElementById(`ch${i}-hmt`).addEventListener('input', function() {
+            validateNumericInput(`ch${i}-hmt`, 'HMT');
+        });
+        
+        document.getElementById(`ch${i}-flow`).addEventListener('input', function() {
+            validateNumericInput(`ch${i}-flow`, 'Débit effectif');
+        });
+    }
+});
+</script>
+═══════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════
+Base de données :
+☐ Colonne flow_rate ajoutée à device_config (REAL NULL)
+Backend :
+☐ update_device_config() : validation HMT et flow_rate
+☐ update_device_config() : insertion flow_rate dans SQL
+☐ get_devices_config() : SELECT flow_rate
+☐ get_devices_config() : retourne flow_rate dans réponse
+☐ Route POST /api/config/device : gestion ValueError
+Frontend :
+☐ Entêtes colonnes ajoutées
+☐ Champ "Débit effectif (m³/h)" pour chaque channel (width: 130px)
+☐ Format select : "X m³/h si HMT 8"
+☐ JavaScript : flow_rate inclus dans saveDeviceConfig()
+☐ JavaScript : validation avant envoi (isNaN)
+☐ JavaScript : flow_rate pré-rempli dans loadCurrentConfig()
+☐ JavaScript : validation temps réel (input event)
+☐ Style CSS : .invalid-input (bordure rouge + background rose)
+Tests :
+☐ Créer config avec flow_rate = 22 pour switch:0 → Enregistré
+☐ Recharger page → flow_rate = 22 pré-rempli
+☐ Saisir "abc" dans flow_rate → Erreur affichée, champ rouge
+☐ Saisir "15.5" dans flow_rate → Validation OK, champ normal
+☐ Laisser flow_rate vide → Enregistrement OK (NULL en BDD)
+☐ Vérifier BDD : SELECT flow_rate FROM device_config → Valeur correcte
+☐ Menu déroulant affiche : "Pedrollo VXM 10/35 (0.75 kW, 4.8 A, 18 m³/h si HMT 8)"
+═══════════════════════════════════════════════════════════
+📝 EXEMPLE FINAL
+═══════════════════════════════════════════════════════════
+Configuration visible dans /admin :
+          Nom    Modèle                                              HMT   Débit effectif
+switch:0:   [PR1]  [Pedrollo VXM 10/35 (0.75 kW, 4.8 A, 18 m³/h si HMT 8) ▼]  [6]   [22]
+switch:1:   [PR2]  [Pedrollo VXM 10/35 (0.75 kW, 4.8 A, 18 m³/h si HMT 8) ▼]  [8]   [18]
+switch:2:   [PS]   [Pedrollo DM/8 (0.55 kW, 3.2 A) ▼]                         [8]   []
+[Enregistrer]
+Après enregistrement :
+switch:0 : HMT=6, flow_rate=22 (pompé sur site avec moins de hauteur)
+switch:1 : HMT=8, flow_rate=18 (correspond au débit de référence constructeur)
+switch:2 : HMT=8, flow_rate=NULL (pas de débit renseigné)
+═══════════════════════════════════════════════════════════
+🎯 POINTS D'ATTENTION
+═══════════════════════════════════════════════════════════
+VALIDATION DOUBLE
+Frontend (UX rapide) + Backend (sécurité)
+FORMAT MENU DÉROULANT
+"18 m³/h si HMT 8" (pas "@ HMT 8m")
+CHAMP OPTIONNEL
+flow_rate peut être NULL (non renseigné)
+FEEDBACK VISUEL
+Bordure rouge + background rose si invalide
+Retour à normal dès correction
+VALEURS PAR DÉFAUT
+HMT = 8 si non renseigné
+flow_rate = NULL si non renseigné
