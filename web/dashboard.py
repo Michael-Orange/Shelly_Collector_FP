@@ -602,8 +602,10 @@ def render_dashboard() -> str:
             const startDate = new Date(today);
             startDate.setDate(today.getDate() - 30);
 
-            document.getElementById('start-date').valueAsDate = startDate;
-            document.getElementById('end-date').valueAsDate = today;
+            function pad(n) { return n < 10 ? '0' + n : '' + n; }
+            function toYMD(d) { return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+            document.getElementById('start-date').value = toYMD(startDate);
+            document.getElementById('end-date').value = toYMD(today);
 
             loadCycles();
             loadDevices();
@@ -913,7 +915,7 @@ def render_dashboard() -> str:
                 return;
             }
 
-            var pwd = prompt('Mot de passe requis pour l\'export CSV :');
+            var pwd = prompt("Mot de passe requis pour l\\u0027export CSV :");
             if (!pwd) return;
             try {
                 var res = await fetch('/api/verify-export-password', {
