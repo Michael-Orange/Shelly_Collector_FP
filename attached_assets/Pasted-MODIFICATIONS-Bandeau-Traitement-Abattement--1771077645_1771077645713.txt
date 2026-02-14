@@ -1,0 +1,231 @@
+MODIFICATIONS : Bandeau Traitement & Abattement
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 OBJECTIF
+1. Remplacer "Eau usée traitée (postes de relevage)" par "Eau usée traitée sur la période sélectionnée"
+2. Ajouter "Eau usée traitée par jour"
+3. Calcul par jour : Volume total / nombre de jours (SANS compter aujourd'hui)
+
+═══════════════════════════════════════════════════════════════════════════════
+🔧 BACKEND - CYCLE DETECTION (Modifier /api/pump-cycles)
+═══════════════════════════════════════════════════════════════════════════════
+
+Ajouter calcul "par jour" dans la réponse :
+
+```python
+@app.get("/api/pump-cycles")
+async def get_pump_cycles(start_date: str, end_date: str):
+    conn = get_db_connection()
+    try:
+        cycles = detect_all_cycles(conn, start_date, end_date)
+        
+        # Calculer eau traitée totale
+        treated_water_m3 = sum(
+            c.get("volume_m3", 0) 
+            for c in cycles 
+            if c.get("pump_type") == "relevage" and c.get("volume_m3")
+        )
+        
+        # NOUVEAU : Calculer nombre de jours (SANS aujourd'hui)
+        from datetime import datetime, timedelta
+        
+        start = datetime.fromisoformat(start_date)
+        end = datetime.fromisoformat(end_date)
+        
+        # Soustraire 1 jour à end_date (ne pas compter aujourd'hui)
+        yesterday = end - timedelta(days=1)
+        
+        # Calculer nombre de jours
+        if yesterday >= start:
+            num_days = (yesterday - start).days + 1  # +1 pour inclure le jour de départ
+        else:
+            num_days = 0  # Si end_date = start_date (aujourd'hui)
+        
+        # Calculer moyenne par jour
+        treated_water_per_day = round(treated_water_m3 / num_days, 2) if num_days > 0 else 0
+        
+        return {
+            "cycles": cycles,
+            "treatment_stats": {
+                "treated_water_m3": round(treated_water_m3, 2),
+                "treated_water_per_day": treated_water_per_day,  # NOUVEAU
+                "num_days": num_days  # Pour debug
+            }
+        }
+    finally:
+        conn.close()
+Explication calcul :
+Période sélectionnée : 2026-01-15 → 2026-02-14 (aujourd'hui)
+End date - 1 jour = 2026-02-13 (hier)
+Nombre de jours = (2026-02-13) - (2026-01-15) + 1 = 29 jours
+Volume total = 1461.9 m³
+Par jour = 1461.9 / 29 = 50.4 m³/jour
+═══════════════════════════════════════════════════════════════════════════════
+🎨 FRONTEND - DASHBOARD (web/dashboard.py)
+═══════════════════════════════════════════════════════════════════════════════
+Modifier le bandeau Traitement :
+<style>
+.treatment-card {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(17, 153, 142, 0.35);
+}
+
+.treatment-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.treatment-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;  /* MODIFIÉ : 2 colonnes */
+    gap: 30px;
+}
+
+.treatment-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.treatment-stat-label {
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+.treatment-stat-value {
+    font-size: 36px;
+    font-weight: bold;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.treatment-stat-unit {
+    font-size: 20px;
+    opacity: 0.9;
+}
+</style>
+
+<!-- BANDEAU TRAITEMENT MODIFIÉ -->
+<div class="treatment-card">
+    <h3>💧 TRAITEMENT & ABATTEMENT</h3>
+    
+    <div class="treatment-stats">
+        <!-- STAT 1 : Volume total -->
+        <div class="treatment-stat">
+            <div class="treatment-stat-label">Eau usée traitée sur la période sélectionnée</div>
+            <div class="treatment-stat-value">
+                <span id="treated-water-total">-</span>
+                <span class="treatment-stat-unit">m³</span>
+            </div>
+        </div>
+        
+        <!-- STAT 2 : Volume par jour (NOUVEAU) -->
+        <div class="treatment-stat">
+            <div class="treatment-stat-label">Eau usée traitée par jour</div>
+            <div class="treatment-stat-value">
+                <span id="treated-water-per-day">-</span>
+                <span class="treatment-stat-unit">m³/jour</span>
+            </div>
+        </div>
+    </div>
+</div>
+Modifier le JavaScript :
+async function loadDashboardData() {
+    const startDate = document.getElementById('start-date').value;
+    const endDate = document.getElementById('end-date').value;
+    
+    const response = await fetch(`/api/pump-cycles?start_date=${startDate}&end_date=${endDate}`);
+    const data = await response.json();
+    
+    // Stats cycles
+    updateCompactStats(data.cycles);
+    
+    // NOUVEAU : Stats traitement
+    document.getElementById('treated-water-total').textContent = data.treatment_stats.treated_water_m3;
+    document.getElementById('treated-water-per-day').textContent = data.treatment_stats.treated_water_per_day;
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+Backend :
+☐ Calcul nombre de jours = (end_date - 1 jour) - start_date + 1
+☐ treated_water_per_day = total / num_days
+☐ Gestion cas num_days = 0 (division par zéro)
+☐ Réponse inclut treated_water_m3, treated_water_per_day, num_days
+Frontend :
+☐ Grid 2 colonnes dans .treatment-stats
+☐ Stat 1 : "Eau usée traitée sur la période sélectionnée"
+☐ Stat 2 : "Eau usée traitée par jour" (NOUVEAU)
+☐ Affichage treated_water_total
+☐ Affichage treated_water_per_day avec unité "m³/jour"
+Tests :
+☐ Période 2026-01-15 → 2026-02-14 (aujourd'hui)
+→ Calcul sur 29 jours (jusqu'au 13/02)
+→ 1461.9 m³ total
+→ ~50.4 m³/jour
+☐ Période 2026-02-14 → 2026-02-14 (même jour)
+→ num_days = 0
+→ treated_water_per_day = 0 (pas d'erreur division par zéro)
+☐ Période 2026-02-10 → 2026-02-14
+→ Calcul sur 4 jours (10, 11, 12, 13 février)
+→ Exclut le 14 (aujourd'hui)
+═══════════════════════════════════════════════════════════════════════════════
+📝 EXEMPLE CALCUL
+═══════════════════════════════════════════════════════════════════════════════
+Période : 2026-01-15 → 2026-02-14
+Étape 1 : Calculer hier
+end_date = 2026-02-14
+yesterday = 2026-02-14 - 1 jour = 2026-02-13
+Étape 2 : Nombre de jours
+start = 2026-01-15
+yesterday = 2026-02-13
+num_days = (2026-02-13 - 2026-01-15).days + 1
+num_days = 29 + 1 = 30 jours... NON !
+Correction calcul :
+(2026-02-13 - 2026-01-15).days = 29 jours
++1 pour inclure le jour de départ = 30 jours
+ATTENDEZ, vérifions :
+15 janvier → 31 janvier = 17 jours (15-31 inclus)
+1 février → 13 février = 13 jours
+Total = 17 + 13 = 30 jours ✅
+Donc :
+treated_water_per_day = 1461.9 / 30 = 48.73 m³/jour
+═══════════════════════════════════════════════════════════════════════════════
+📊 APERÇU VISUEL
+═══════════════════════════════════════════════════════════════════════════════
+┌────────────────────────────────────────────────────────────────┐
+│  💧 TRAITEMENT & ABATTEMENT                   [Vert eau]       │
+│                                                                │
+│  Eau usée traitée sur              Eau usée traitée par jour  │
+│  la période sélectionnée                                       │
+│  1461.9 m³                         48.73 m³/jour               │
+└────────────────────────────────────────────────────────────────┘
+
+---
+
+## 🎯 RÉSUMÉ DES MODIFICATIONS
+
+### **Texte** :
+- ❌ "Eau usée traitée (postes de relevage)"
+- ✅ "Eau usée traitée sur la période sélectionnée"
+
+### **Nouveau champ** :
+- ✅ "Eau usée traitée par jour"
+- ✅ Unité : "m³/jour"
+
+### **Calcul** :
+```python
+yesterday = end_date - 1 jour
+num_days = (yesterday - start_date).days + 1
+per_day = total_m3 / num_days
+Pourquoi exclure aujourd'hui :
+Les données du jour en cours sont partielles
+Biaiserait la moyenne à la baisse
