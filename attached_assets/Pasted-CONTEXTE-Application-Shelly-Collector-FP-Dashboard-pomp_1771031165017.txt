@@ -1,0 +1,123 @@
+CONTEXTE
+========
+Application Shelly_Collector_FP - Dashboard pompes.
+Le cycle detector calcule déjà avg_current_a.
+L'API retourne déjà cette donnée dans les cycles.
+Besoin : Afficher cette colonne dans le tableau du dashboard.
+
+OBJECTIF
+========
+Ajouter une colonne "Courant moy." entre "Puissance moy." et la fin du tableau.
+
+SPÉCIFICATIONS
+===============
+
+MODIFICATION DANS web/dashboard.py
+-----------------------------------
+
+1. AJOUTER L'EN-TÊTE DE COLONNE
+
+Dans le <thead> du tableau, APRÈS la colonne "Puissance moy." :
+
+<th onclick="sortTable('avg_current_a')">Courant moy. <span class="sort-icon">↕</span></th>
+
+Le <thead> complet devrait ressembler à :
+
+<thead>
+    <tr>
+        <th onclick="sortTable('device_id')">Device <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('channel')">Canal <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_date')">Date <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('start_time')">Heure début <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('end_time')">Heure fin <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('duration_minutes')">Durée <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('avg_power_w')">Puissance moy. <span class="sort-icon">↕</span></th>
+        <th onclick="sortTable('avg_current_a')">Courant moy. <span class="sort-icon">↕</span></th>
+    </tr>
+</thead>
+
+
+2. AJOUTER LA CELLULE DE DONNÉES
+
+Dans la fonction renderTable() du JavaScript, APRÈS la ligne qui ajoute avg_power_w :
+
+// Après la ligne :
+// <td>${cycle.avg_power_w ? cycle.avg_power_w.toFixed(1) + ' W' : '-'}</td>
+
+// Ajouter :
+<td>${cycle.avg_current_a ? cycle.avg_current_a.toFixed(1) + ' A' : '-'}</td>
+
+Exemple de ligne complète dans renderTable() :
+
+row.innerHTML = `
+    <td>${deviceName}</td>
+    <td>${channelName}</td>
+    <td>${cycle.start_date}</td>
+    <td>${cycle.start_time}</td>
+    <td>${cycle.end_time || 'En cours'}</td>
+    <td>${cycle.duration_minutes ? cycle.duration_minutes + ' min' : '-'}</td>
+    <td>${cycle.avg_power_w ? cycle.avg_power_w.toFixed(1) + ' W' : '-'}</td>
+    <td>${cycle.avg_current_a ? cycle.avg_current_a.toFixed(1) + ' A' : '-'}</td>
+`;
+
+
+3. METTRE À JOUR LE TRI
+
+Dans la fonction updateSortIcons() du JavaScript, ajouter 'avg_current_a' dans la liste des colonnes :
+
+const columns = [
+    'device_id', 
+    'channel', 
+    'start_date', 
+    'start_time', 
+    'end_time', 
+    'duration_minutes', 
+    'avg_power_w',
+    'avg_current_a'  // 🆕 Ajouter cette ligne
+];
+
+
+4. METTRE À JOUR L'EXPORT CSV (si existant)
+
+Si la fonction exportCSV() existe, ajouter le champ current dans les headers et les données :
+
+const headers = [
+    'Device', 
+    'Canal', 
+    'Date', 
+    'Heure début', 
+    'Heure fin', 
+    'Durée (min)', 
+    'Puissance moy. (W)',
+    'Courant moy. (A)'  // 🆕
+];
+
+Et dans la boucle des cycles :
+
+csv += `${deviceName},${channelName},${cycle.start_date},${cycle.start_time},${cycle.end_time || 'En cours'},${cycle.duration_minutes || ''},${cycle.avg_power_w || ''},${cycle.avg_current_a || ''}\n`;
+
+
+TESTS
+=====
+1. ✅ Recharger /dashboard
+2. ✅ Vérifier que la colonne "Courant moy." apparaît après "Puissance moy."
+3. ✅ Vérifier que les valeurs s'affichent (ex: "2.5 A")
+4. ✅ Cliquer sur "Courant moy." → Tri décroissant
+5. ✅ Recliquer → Tri croissant
+6. ✅ Recliquer → Retour à l'ordre normal
+7. ✅ Vérifier que l'export CSV inclut la colonne
+
+RÉSULTAT ATTENDU
+================
+Tableau avec 8 colonnes :
+1. Device
+2. Canal
+3. Date
+4. Heure début
+5. Heure fin
+6. Durée
+7. Puissance moy.
+8. 🆕 Courant moy. (triable)
+
+Exemple de ligne :
+Sagemcom | PR2 | 13/02/2026 | 23h57 | 23h59 | 2 min | 1142.3 W | 5.4 A
