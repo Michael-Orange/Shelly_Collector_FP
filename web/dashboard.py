@@ -188,9 +188,9 @@ def render_dashboard() -> str:
         }
 
         .treatment-stats {
-            display: flex;
-            align-items: center;
-            gap: 40px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
         }
 
         .treatment-stat {
@@ -464,10 +464,17 @@ def render_dashboard() -> str:
             <hr class="stats-separator">
             <div class="treatment-stats">
                 <div class="treatment-stat">
-                    <div class="treatment-stat-label">Eau usee traitee (postes de relevage)</div>
+                    <div class="treatment-stat-label">Eau usee traitee sur la periode selectionnee</div>
                     <div class="treatment-stat-value">
                         <span id="treated-water-value">-</span>
                         <span class="treatment-stat-unit">m&sup3;</span>
+                    </div>
+                </div>
+                <div class="treatment-stat">
+                    <div class="treatment-stat-label">Eau usee traitee par jour</div>
+                    <div class="treatment-stat-value">
+                        <span id="treated-water-per-day">-</span>
+                        <span class="treatment-stat-unit">m&sup3;/jour</span>
                     </div>
                 </div>
             </div>
@@ -736,8 +743,10 @@ def render_dashboard() -> str:
 
             if (currentData && currentData.treatment_stats) {
                 document.getElementById('treated-water-value').textContent = currentData.treatment_stats.treated_water_m3;
+                document.getElementById('treated-water-per-day').textContent = currentData.treatment_stats.treated_water_per_day;
             } else {
                 document.getElementById('treated-water-value').textContent = '-';
+                document.getElementById('treated-water-per-day').textContent = '-';
             }
         }
 

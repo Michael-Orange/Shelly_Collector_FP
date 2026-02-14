@@ -129,13 +129,23 @@ async def get_pump_cycles(
             stats['min_power'] = 0
         stats = {k: round(v, 1) for k, v in stats.items()}
 
+        from datetime import timedelta
+        yesterday = end_dt - timedelta(days=1)
+        if yesterday >= start_dt:
+            num_days = (yesterday - start_dt).days + 1
+        else:
+            num_days = 0
+        treated_water_per_day = round(treated_water_m3 / num_days, 2) if num_days > 0 else 0
+
         return {
             "total": len(cycles),
             "device_ids": found_device_ids,
             "configs": configs,
             "stats": stats,
             "treatment_stats": {
-                "treated_water_m3": round(treated_water_m3, 2)
+                "treated_water_m3": round(treated_water_m3, 2),
+                "treated_water_per_day": treated_water_per_day,
+                "num_days": num_days
             },
             "filters": {
                 "device_id": device_id,
