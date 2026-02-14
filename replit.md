@@ -4,7 +4,18 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-14 (Latest)**: Fix voltage : médiane + filtrage 180-260V :
+**2026-02-14 (Latest)**: Qualité eaux brutes + Impact CO₂e :
+- **New**: `dbo5_mg_l`, `dco_mg_l`, `mes_mg_l` columns added to `device_config` (defaults: 570, 1250, 650)
+- **New**: Section "Qualité des eaux brutes" dans /admin (3 inputs DBO5/DCO/MES par device)
+- **New**: `calculate_co2e_impact()` function in routes.py (PRG CH₄=28, MCF fosse=0.5, MCF FPV=0.03)
+- **New**: API `/api/pump-cycles` returns `co2e_impact` (co2e_avoided_kg, reduction_percent, ch4_avoided_kg)
+- **New**: Dashboard bandeau 4 colonnes "TRAITEMENT & IMPACT ENVIRONNEMENTAL" (eau traitée, par jour, émissions évitées, réduction %)
+- **Modified**: `upsert_device_with_channels()` — accepts dbo5/dco/mes params, persists on INSERT and UPDATE
+- **Modified**: `get_configs_map()` — returns dbo5/dco/mes per device
+- **Modified**: GET `/api/config/devices` — returns dbo5/dco/mes per device
+- **Fix**: Removed shadowing `from datetime import timedelta` inside pump-cycles handler
+
+**2026-02-14**: Fix voltage : médiane + filtrage 180-260V :
 - **Modified**: `cycle_detector.py` — voltage par cycle utilise MÉDIANE au lieu de MOYENNE
 - **Modified**: `_median_voltage()` helper — filtre les valeurs < 180V ou > 260V (élimine les 0V artefacts)
 - **Modified**: Retourne `None` si aucune valeur valide dans la plage

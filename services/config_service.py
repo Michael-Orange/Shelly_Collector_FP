@@ -25,6 +25,7 @@ async def get_configs_map(pool: asyncpg.Pool) -> Dict:
         rows = await conn.fetch("""
             SELECT dc.device_id, dc.device_name, dc.channel, dc.channel_name,
                    dc.pump_model_id, dc.flow_rate, dc.pump_type,
+                   dc.dbo5_mg_l, dc.dco_mg_l, dc.mes_mg_l,
                    pm.id as pm_id, pm.name as pm_name, pm.power_kw as pm_power_kw,
                    pm.current_ampere as pm_current_ampere, pm.flow_rate_hmt8 as pm_flow_rate_hmt8
             FROM device_config dc
@@ -37,6 +38,9 @@ async def get_configs_map(pool: asyncpg.Pool) -> Dict:
         if device_id not in configs:
             configs[device_id] = {
                 'device_name': row['device_name'],
+                'dbo5_mg_l': row['dbo5_mg_l'] or 570,
+                'dco_mg_l': row['dco_mg_l'] or 1250,
+                'mes_mg_l': row['mes_mg_l'] or 650,
                 'channels': {}
             }
         if row['channel']:
@@ -133,7 +137,7 @@ async def delete_pump_model(pool: asyncpg.Pool, pump_id: int) -> dict:
 VALID_PUMP_TYPES = ['relevage', 'sortie', 'autre']
 
 
-async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device_name: Optional[str], channels: List[Dict]):
+async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device_name: Optional[str], channels: List[Dict], dbo5_mg_l: int = 570, dco_mg_l: int = 1250, mes_mg_l: int = 650):
     for ch in channels:
         fr = ch.get('flow_rate')
         if fr is not None and fr != '':
@@ -153,16 +157,16 @@ async def upsert_device_with_channels(pool: asyncpg.Pool, device_id: str, device
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("""
-                UPDATE device_config SET device_name = $2, updated_at = NOW()
+                UPDATE device_config SET device_name = $2, dbo5_mg_l = $3, dco_mg_l = $4, mes_mg_l = $5, updated_at = NOW()
                 WHERE device_id = $1
-            """, device_id, device_name)
+            """, device_id, device_name, dbo5_mg_l, dco_mg_l, mes_mg_l)
             for ch in channels:
                 fr = ch.get('flow_rate')
                 flow_rate_val = float(fr) if fr is not None and fr != '' else None
                 pump_type_val = ch.get('pump_type', 'relevage')
                 await conn.execute("""
-                    INSERT INTO device_config (device_id, device_name, channel, channel_name, pump_model_id, flow_rate, pump_type)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    INSERT INTO device_config (device_id, device_name, channel, channel_name, pump_model_id, flow_rate, pump_type, dbo5_mg_l, dco_mg_l, mes_mg_l)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (device_id, channel)
-                    DO UPDATE SET channel_name = $4, pump_model_id = $5, device_name = $2, flow_rate = $6, pump_type = $7, updated_at = NOW()
-                """, device_id, device_name, ch['channel'], ch.get('name'), ch.get('pump_model_id'), flow_rate_val, pump_type_val)
+                    DO UPDATE SET channel_name = $4, pump_model_id = $5, device_name = $2, flow_rate = $6, pump_type = $7, dbo5_mg_l = $8, dco_mg_l = $9, mes_mg_l = $10, updated_at = NOW()
+                """, device_id, device_name, ch['channel'], ch.get('name'), ch.get('pump_model_id'), flow_rate_val, pump_type_val, dbo5_mg_l, dco_mg_l, mes_mg_l)

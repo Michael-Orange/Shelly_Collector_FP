@@ -19,6 +19,30 @@ from services.config_service import (
 router = APIRouter(prefix="/api")
 
 
+def calculate_co2e_impact(volume_m3: float, dbo5_mg_l: float) -> dict:
+    if volume_m3 <= 0 or dbo5_mg_l <= 0:
+        return {"co2e_avoided_kg": 0, "reduction_percent": 0, "ch4_avoided_kg": 0}
+
+    dbo5_kg_per_m3 = dbo5_mg_l / 1000
+    bo_factor = 0.6
+    mcf_fosse = 0.5
+    mcf_fpv = 0.03
+    gwp_ch4 = 28
+
+    masse_dbo5_kg = volume_m3 * dbo5_kg_per_m3
+    ch4_fosse_kg = masse_dbo5_kg * bo_factor * mcf_fosse
+    ch4_fpv_kg = masse_dbo5_kg * bo_factor * mcf_fpv
+    ch4_avoided_kg = ch4_fosse_kg - ch4_fpv_kg
+    co2e_avoided_kg = ch4_avoided_kg * gwp_ch4
+    reduction_percent = (ch4_avoided_kg / ch4_fosse_kg * 100) if ch4_fosse_kg > 0 else 0
+
+    return {
+        "co2e_avoided_kg": round(co2e_avoided_kg, 2),
+        "reduction_percent": round(reduction_percent, 1),
+        "ch4_avoided_kg": round(ch4_avoided_kg, 2)
+    }
+
+
 @router.get("/pump-cycles")
 async def get_pump_cycles(
     request: Request,
@@ -129,13 +153,22 @@ async def get_pump_cycles(
             stats['min_power'] = 0
         stats = {k: round(v, 1) for k, v in stats.items()}
 
-        from datetime import timedelta
         yesterday = end_dt - timedelta(days=1)
         if yesterday >= start_dt:
             num_days = (yesterday - start_dt).days + 1
         else:
             num_days = 0
         treated_water_per_day = round(treated_water_m3 / num_days, 2) if num_days > 0 else 0
+
+        dbo5_val = 570
+        if device_id and device_id in configs:
+            dbo5_val = configs[device_id].get('dbo5_mg_l', 570)
+        elif found_device_ids:
+            for did in found_device_ids:
+                if did in configs:
+                    dbo5_val = configs[did].get('dbo5_mg_l', 570)
+                    break
+        co2e_impact = calculate_co2e_impact(treated_water_m3, dbo5_val)
 
         return {
             "total": len(cycles),
@@ -147,6 +180,7 @@ async def get_pump_cycles(
                 "treated_water_per_day": treated_water_per_day,
                 "num_days": num_days
             },
+            "co2e_impact": co2e_impact,
             "filters": {
                 "device_id": device_id,
                 "channel": channel,
@@ -175,10 +209,16 @@ async def get_devices_config(request: Request):
                 device['device_name'] = configs[did]['device_name']
                 device['channel_configs'] = configs[did]['channels']
                 device['channel_names'] = {ch: info['channel_name'] for ch, info in configs[did]['channels'].items()}
+                device['dbo5_mg_l'] = configs[did].get('dbo5_mg_l', 570)
+                device['dco_mg_l'] = configs[did].get('dco_mg_l', 1250)
+                device['mes_mg_l'] = configs[did].get('mes_mg_l', 650)
             else:
                 device['device_name'] = None
                 device['channel_configs'] = {}
                 device['channel_names'] = {}
+                device['dbo5_mg_l'] = 570
+                device['dco_mg_l'] = 1250
+                device['mes_mg_l'] = 650
 
         return {"devices": devices}
     except Exception as e:
@@ -200,7 +240,10 @@ async def update_device_name(request: Request):
 
         if "channels" in body:
             channels = body["channels"]
-            await upsert_device_with_channels(db_pool, did, name, channels)
+            dbo5 = int(body.get("dbo5_mg_l", 570))
+            dco = int(body.get("dco_mg_l", 1250))
+            mes = int(body.get("mes_mg_l", 650))
+            await upsert_device_with_channels(db_pool, did, name, channels, dbo5, dco, mes)
             print(f"✅ Device saved with channels: {did} -> {name}", flush=True)
         else:
             await upsert_device_name(db_pool, did, name)

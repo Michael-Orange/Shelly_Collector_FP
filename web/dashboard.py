@@ -186,50 +186,57 @@ def render_dashboard() -> str:
         }
 
         .treatment-card {
-            background: linear-gradient(135deg, #11998e 0%, #1e7a6d 100%);
+            background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%);
             border-radius: 12px;
-            padding: 25px 30px;
+            padding: 30px;
             margin-bottom: 2rem;
             color: white;
-            box-shadow: 0 8px 25px rgba(17, 153, 142, 0.4);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
         .treatment-card h3 {
-            margin: 0 0 18px 0;
-            font-size: 17px;
+            margin: 0 0 25px 0;
+            font-size: 1.3rem;
             font-weight: 600;
-            opacity: 0.95;
-            letter-spacing: 0.5px;
         }
 
-        .treatment-stats {
+        .treatment-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
         }
 
-        .treatment-stat {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
+        .treatment-box {
+            background: rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
         }
 
-        .treatment-stat-label {
-            font-size: 14px;
-            opacity: 0.9;
+        .treatment-box-label {
+            color: rgba(255,255,255,0.9);
+            font-size: 0.85rem;
+            margin-bottom: 8px;
         }
 
-        .treatment-stat-value {
-            font-size: 32px;
-            font-weight: bold;
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
+        .treatment-box-value {
+            color: white;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 5px;
         }
 
-        .treatment-stat-unit {
-            font-size: 18px;
-            opacity: 0.85;
+        .treatment-box-unit {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.85rem;
+        }
+
+        .treatment-info {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+            color: rgba(255,255,255,0.85);
+            font-size: 0.9rem;
         }
 
         .table-container {
@@ -405,8 +412,8 @@ def render_dashboard() -> str:
                 font-size: 16px;
             }
 
-            .treatment-stat-value {
-                font-size: 24px;
+            .treatment-box-value {
+                font-size: 1.5rem;
             }
         }
 
@@ -430,8 +437,8 @@ def render_dashboard() -> str:
                 grid-template-columns: 1fr;
             }
 
-            .treatment-stats {
-                grid-template-columns: 1fr;
+            .treatment-grid {
+                grid-template-columns: 1fr 1fr;
             }
         }
     </style>
@@ -525,23 +532,31 @@ def render_dashboard() -> str:
         </div>
 
         <div class="treatment-card">
-            <h3>&#x1F4A7; TRAITEMENT &amp; ABATTEMENT</h3>
-            <hr class="stats-separator">
-            <div class="treatment-stats">
-                <div class="treatment-stat">
-                    <div class="treatment-stat-label">Eau usee traitee sur la periode selectionnee</div>
-                    <div class="treatment-stat-value">
-                        <span id="treated-water-value">-</span>
-                        <span class="treatment-stat-unit">m&sup3;</span>
-                    </div>
+            <h3>&#x1F4A7; TRAITEMENT &amp; IMPACT ENVIRONNEMENTAL</h3>
+            <div class="treatment-grid">
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F4CA; Eau traitee</div>
+                    <div class="treatment-box-value" id="treated-water-value">--</div>
+                    <div class="treatment-box-unit">m&sup3;</div>
                 </div>
-                <div class="treatment-stat">
-                    <div class="treatment-stat-label">Eau usee traitee par jour</div>
-                    <div class="treatment-stat-value">
-                        <span id="treated-water-per-day">-</span>
-                        <span class="treatment-stat-unit">m&sup3;/jour</span>
-                    </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F4C5; Par jour</div>
+                    <div class="treatment-box-value" id="treated-water-per-day">--</div>
+                    <div class="treatment-box-unit">m&sup3;/jour</div>
                 </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F331; Emissions evitees</div>
+                    <div class="treatment-box-value" id="co2e-avoided">--</div>
+                    <div class="treatment-box-unit" id="co2e-unit">kg CO&sup2;e</div>
+                </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x2705; Reduction</div>
+                    <div class="treatment-box-value" id="reduction-percent">--</div>
+                    <div class="treatment-box-unit">%</div>
+                </div>
+            </div>
+            <div class="treatment-info">
+                &#x2139;&#xFE0F; Reduction d'emissions par rapport a une fosse standard (PRG CH&#x2084; = 28, GIEC AR5)
             </div>
         </div>
 
@@ -829,6 +844,18 @@ def render_dashboard() -> str:
             if (currentData && currentData.treatment_stats) {
                 document.getElementById('treated-water-value').textContent = currentData.treatment_stats.treated_water_m3;
                 document.getElementById('treated-water-per-day').textContent = currentData.treatment_stats.treated_water_per_day;
+
+                if (currentData.co2e_impact) {
+                    var co2eKg = currentData.co2e_impact.co2e_avoided_kg;
+                    if (co2eKg >= 1000) {
+                        document.getElementById('co2e-avoided').textContent = (co2eKg / 1000).toFixed(2);
+                        document.getElementById('co2e-unit').textContent = 't CO\\u2082e';
+                    } else {
+                        document.getElementById('co2e-avoided').textContent = co2eKg.toFixed(1);
+                        document.getElementById('co2e-unit').textContent = 'kg CO\\u2082e';
+                    }
+                    document.getElementById('reduction-percent').textContent = currentData.co2e_impact.reduction_percent.toFixed(1);
+                }
             } else {
                 document.getElementById('treated-water-value').textContent = '-';
                 document.getElementById('treated-water-per-day').textContent = '-';

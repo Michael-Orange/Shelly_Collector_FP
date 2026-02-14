@@ -66,6 +66,15 @@ async def create_tables(pool: asyncpg.Pool):
         await conn.execute("""
             ALTER TABLE device_config ADD COLUMN IF NOT EXISTS pump_type TEXT NOT NULL DEFAULT 'relevage'
         """)
+        await conn.execute("""
+            ALTER TABLE device_config ADD COLUMN IF NOT EXISTS dbo5_mg_l INTEGER DEFAULT 570
+        """)
+        await conn.execute("""
+            ALTER TABLE device_config ADD COLUMN IF NOT EXISTS dco_mg_l INTEGER DEFAULT 1250
+        """)
+        await conn.execute("""
+            ALTER TABLE device_config ADD COLUMN IF NOT EXISTS mes_mg_l INTEGER DEFAULT 650
+        """)
     print("✅ Tables verified/created", flush=True)
 
 

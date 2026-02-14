@@ -45,6 +45,7 @@ def render_admin() -> str:
             .input-row { flex-direction: column; align-items: stretch; }
             .input-row label { min-width: unset; }
             .channels { margin-left: 0; }
+            .water-quality-grid { grid-template-columns: 1fr !important; }
         }
     </style>
 </head>
@@ -149,6 +150,24 @@ def render_admin() -> str:
                             '</div>';
                         }).join('') +
                     '</div>' +
+                    '<div style="border-top: 2px solid #e5e7eb; margin: 30px 0 20px 0; padding-top: 20px;">' +
+                        '<h3 style="font-size: 1.05rem; font-weight: 600; color: #2d8659; margin-bottom: 6px;">&#x1F4A7; Qualite des eaux brutes</h3>' +
+                        '<p style="font-size: 0.85rem; color: #6b7280; margin-bottom: 15px;">Valeurs moyennes estimees des eaux du site</p>' +
+                    '</div>' +
+                    '<div class="water-quality-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2d8659; margin-bottom: 1rem;">' +
+                        '<div>' +
+                            '<label style="display: block; font-weight: 500; color: #374151; margin-bottom: 6px; font-size: 0.9rem;">DBO5 (mg/L)</label>' +
+                            '<input type="number" id="dbo5-' + safeId + '" value="' + (device.dbo5_mg_l || 570) + '" min="0" max="5000" step="10" style="width: 100%; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem;">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label style="display: block; font-weight: 500; color: #374151; margin-bottom: 6px; font-size: 0.9rem;">DCO (mg/L)</label>' +
+                            '<input type="number" id="dco-' + safeId + '" value="' + (device.dco_mg_l || 1250) + '" min="0" max="10000" step="10" style="width: 100%; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem;">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label style="display: block; font-weight: 500; color: #374151; margin-bottom: 6px; font-size: 0.9rem;">MES (mg/L)</label>' +
+                            '<input type="number" id="mes-' + safeId + '" value="' + (device.mes_mg_l || 650) + '" min="0" max="5000" step="10" style="width: 100%; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem;">' +
+                        '</div>' +
+                    '</div>' +
                     '<button class="btn-save" data-device="' + safeId + '" data-channels="' + encodeURIComponent(JSON.stringify(device.channels)) + '" onclick="saveDevice(this.dataset.device, JSON.parse(decodeURIComponent(this.dataset.channels)))">Enregistrer tout</button>' +
                 '</div>';
             }).join('');
@@ -186,6 +205,13 @@ def render_admin() -> str:
                 });
             }
 
+            var dbo5Input = document.getElementById('dbo5-' + deviceId);
+            var dcoInput = document.getElementById('dco-' + deviceId);
+            var mesInput = document.getElementById('mes-' + deviceId);
+            var dbo5Val = dbo5Input ? parseInt(dbo5Input.value) || 570 : 570;
+            var dcoVal = dcoInput ? parseInt(dcoInput.value) || 1250 : 1250;
+            var mesVal = mesInput ? parseInt(mesInput.value) || 650 : 650;
+
             try {
                 var res = await fetch('/api/config/device', {
                     method: 'POST',
@@ -193,7 +219,10 @@ def render_admin() -> str:
                     body: JSON.stringify({
                         device_id: deviceId,
                         device_name: deviceName,
-                        channels: channelData
+                        channels: channelData,
+                        dbo5_mg_l: dbo5Val,
+                        dco_mg_l: dcoVal,
+                        mes_mg_l: mesVal
                     })
                 });
                 if (res.ok) {
