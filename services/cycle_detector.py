@@ -1,5 +1,13 @@
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict
+from statistics import median
+
+
+def _median_voltage(voltages):
+    valid = [v for v in voltages if v is not None and 180 <= v <= 260]
+    if not valid:
+        return None
+    return round(median(valid), 1)
 
 
 def detect_cycles(
@@ -58,7 +66,7 @@ def detect_cycles(
                 if cycle_duration >= min_duration_minutes:
                     avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
                     avg_current = sum(cycle_currents) / len(cycle_currents) if cycle_currents else 0
-                    avg_voltage = sum(cycle_voltages) / len(cycle_voltages) if cycle_voltages else 0
+                    med_voltage = _median_voltage(cycle_voltages)
 
                     cycles.append({
                         "device_id": dev_id,
@@ -68,7 +76,7 @@ def detect_cycles(
                         "duration_minutes": round(cycle_duration, 1),
                         "avg_power_w": round(avg_power, 1),
                         "avg_current_a": round(avg_current, 2),
-                        "avg_voltage_v": round(avg_voltage, 1),
+                        "avg_voltage_v": med_voltage,
                         "records_count": len(cycle_powers),
                         "is_ongoing": False
                     })
@@ -92,7 +100,7 @@ def detect_cycles(
             if cycle_duration >= min_duration_minutes or is_ongoing:
                 avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
                 avg_current = sum(cycle_currents) / len(cycle_currents) if cycle_currents else 0
-                avg_voltage = sum(cycle_voltages) / len(cycle_voltages) if cycle_voltages else 0
+                med_voltage = _median_voltage(cycle_voltages)
 
                 cycles.append({
                     "device_id": dev_id,
@@ -102,7 +110,7 @@ def detect_cycles(
                     "duration_minutes": round(cycle_duration, 1),
                     "avg_power_w": round(avg_power, 1),
                     "avg_current_a": round(avg_current, 2),
-                    "avg_voltage_v": round(avg_voltage, 1),
+                    "avg_voltage_v": med_voltage,
                     "records_count": len(cycle_powers),
                     "is_ongoing": is_ongoing
                 })

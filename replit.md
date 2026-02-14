@@ -4,7 +4,12 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-14 (Latest)**: Refonte dashboard compact + Type de poste + Traitement eau :
+**2026-02-14 (Latest)**: Fix voltage : médiane + filtrage 180-260V :
+- **Modified**: `cycle_detector.py` — voltage par cycle utilise MÉDIANE au lieu de MOYENNE
+- **Modified**: `_median_voltage()` helper — filtre les valeurs < 180V ou > 260V (élimine les 0V artefacts)
+- **Modified**: Retourne `None` si aucune valeur valide dans la plage
+
+**2026-02-14**: Refonte dashboard compact + Type de poste + Traitement eau :
 - **New**: `pump_type` TEXT NOT NULL DEFAULT 'relevage' column added to `device_config` (relevage/sortie/autre)
 - **New**: Dashboard bandeau compact "SYNTHESE DES CYCLES" (Option C) — 6 stats avec emojis sur 2 lignes
 - **New**: Dashboard bandeau "TRAITEMENT & ABATTEMENT" — volume eau traitée en m³ (vert teal)
