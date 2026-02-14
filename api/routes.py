@@ -154,9 +154,13 @@ async def get_pump_cycles(
             stats['min_power'] = 0
         stats = {k: round(v, 1) for k, v in stats.items()}
 
-        yesterday = end_dt - timedelta(days=1)
-        if yesterday >= start_dt:
-            num_days = (yesterday - start_dt).days + 1
+        today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        if end_dt.date() >= today_utc.date():
+            last_full_day = end_dt - timedelta(days=1)
+        else:
+            last_full_day = end_dt
+        if last_full_day >= start_dt:
+            num_days = (last_full_day - start_dt).days + 1
         else:
             num_days = 0
         treated_water_per_day = round(treated_water_m3 / num_days, 2) if num_days > 0 else 0
