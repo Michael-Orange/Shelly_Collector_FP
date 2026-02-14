@@ -535,7 +535,7 @@ def render_dashboard() -> str:
             <h3>&#x1F4A7; TRAITEMENT &amp; IMPACT ENVIRONNEMENTAL</h3>
             <div class="treatment-grid">
                 <div class="treatment-box">
-                    <div class="treatment-box-label">&#x1F4CA; Eau trait&#233;e (p&#233;riode)</div>
+                    <div class="treatment-box-label">&#x1F4CA; Eau us&#233;e trait&#233;e (p&#233;riode)</div>
                     <div class="treatment-box-value" id="treated-water-value">--</div>
                     <div class="treatment-box-unit">m&sup3;</div>
                 </div>
