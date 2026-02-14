@@ -4,7 +4,7 @@ from typing import List, Dict
 
 def detect_cycles(
     records: List[tuple],
-    gap_threshold_minutes: int = 3,
+    gap_threshold_minutes: int = 4,
     min_duration_minutes: int = 2
 ) -> List[Dict]:
     if not records:
