@@ -1,0 +1,87 @@
+FIX : Harmoniser formatage décimales (1 chiffre après virgule)
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 PROBLÈME
+Dans le tableau des cycles, formatage incohérent :
+- Parfois 1 décimale : 2.4 A, 422.6 W
+- Parfois 2 décimales : 2.48 A, 2.46 A
+
+→ Harmoniser à 1 décimale partout
+
+═══════════════════════════════════════════════════════════════════════════════
+🔧 CORRECTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+Identifier TOUS les endroits où on affiche des valeurs W et A dans le tableau,
+puis appliquer .toFixed(1)
+
+Exemples à corriger :
+
+1. Colonnes du tableau cycles
+   - Puissance moyenne
+   - Courant moyen
+   - Min/Max Watts
+   - Min/Max Ampères
+
+2. JavaScript : Lors de la construction des lignes du tableau
+
+AVANT (incohérent) :
+```javascript
+// Exemple hypothétique
+row.avg_power_w  // Affiche 422.6 ou 422.63
+row.avg_ampere   // Affiche 2.4 ou 2.48
+APRÈS (harmonisé) :
+// Forcer 1 décimale partout
+parseFloat(row.avg_power_w).toFixed(1)   // Toujours X.X W
+parseFloat(row.avg_ampere).toFixed(1)    // Toujours X.X A
+parseFloat(row.min_watt).toFixed(1)
+parseFloat(row.max_watt).toFixed(1)
+parseFloat(row.min_ampere).toFixed(1)
+parseFloat(row.max_ampere).toFixed(1)
+ATTENTION : Les valeurs affichées dans le bandeau statistiques (médiane, plage)
+doivent AUSSI respecter 1 décimale :
+// Dans updateCompactStats()
+
+// Médiane puissance (déjà arrondi à l'entier, OK)
+Math.round(calculateMedian(allPowerValues))  // OK : pas de décimale
+
+// Médiane intensité
+calculateMedian(allAmpereValues).toFixed(1)  // ✅ 1 décimale
+
+// Plages
+minW.toFixed(1)  // ✅ 1 décimale
+maxW.toFixed(1)  // ✅ 1 décimale
+minA.toFixed(1)  // ✅ 1 décimale (déjà fait)
+maxA.toFixed(1)  // ✅ 1 décimale (déjà fait)
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+☐ Identifier tous les endroits où Watts et Ampères sont affichés
+☐ Appliquer .toFixed(1) systématiquement
+☐ Vérifier tableau des cycles
+☐ Vérifier bandeau statistiques
+☐ Vérifier graphiques (si valeurs affichées)
+Test visuel :
+☐ Toutes les valeurs W : format XXX.X W (ex: 422.6 W)
+☐ Toutes les valeurs A : format X.X A (ex: 2.4 A)
+☐ Pas de 2 décimales (2.48 → 2.5)
+☐ Pas de 0 décimale (423 → 423.0)
+═══════════════════════════════════════════════════════════════════════════════
+📝 EXEMPLE AVANT/APRÈS
+═══════════════════════════════════════════════════════════════════════════════
+AVANT (incohérent) :
+422.6 W    2.4 A
+416.5 W    2.48 A
+413.9 W    2.46 A
+APRÈS (harmonisé) :
+422.6 W    2.4 A
+416.5 W    2.5 A  ← Arrondi
+413.9 W    2.5 A  ← Arrondi
+
+---
+
+## 🎯 RÉSUMÉ
+
+**Règle simple** : Toutes les valeurs W et A → **1 décimale obligatoire**
+- ✅ `value.toFixed(1)`
+- ✅ Applicable partout (tableau, stats, graphiques)

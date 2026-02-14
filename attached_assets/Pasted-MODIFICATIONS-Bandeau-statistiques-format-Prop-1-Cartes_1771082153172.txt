@@ -1,0 +1,283 @@
+MODIFICATIONS : Bandeau statistiques format Prop 1 (Cartes 2×2)
+═══════════════════════════════════════════════════════════════════════════════
+
+📌 OBJECTIF
+1. Remplacer "moyenne" par "médiane" pour Puissance et Intensité
+2. Clarifier les labels (ajouter "par cycle", "médiane", "Plage:")
+3. Restructurer l'affichage en format 2×2
+
+═══════════════════════════════════════════════════════════════════════════════
+🎨 FRONTEND - DASHBOARD (web/dashboard.py)
+═══════════════════════════════════════════════════════════════════════════════
+
+A. NOUVEAU HTML (REMPLACER le bandeau stats actuel)
+----------------------------------------------------
+
+```html
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #2d8659 0%, #1e5d3f 100%);
+    border-radius: 12px;
+    padding: 25px 30px;
+    margin-bottom: 30px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(45, 134, 89, 0.4);
+}
+
+.stats-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0.95;
+    letter-spacing: 0.5px;
+}
+
+.stats-separator {
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    margin: 20px 0;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+.stat-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stat-box-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    opacity: 0.9;
+    margin-bottom: 10px;
+}
+
+.stat-box-line {
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.stat-value {
+    font-weight: bold;
+    font-size: 18px;
+}
+
+.stat-subtitle {
+    font-size: 13px;
+    opacity: 0.85;
+}
+</style>
+
+<!-- BANDEAU STATISTIQUES (Prop 1) -->
+<div class="stats-card">
+    <h3>SYNTHÈSE DES CYCLES</h3>
+    
+    <!-- LIGNE 1 : Cycles + Durée -->
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-box-title">📊 CYCLES</div>
+            <div class="stat-box-line">
+                <span class="stat-value" id="stat-total-cycles">-</span> total
+            </div>
+            <div class="stat-box-line">
+                <span class="stat-value" id="stat-running">-</span> en cours
+            </div>
+        </div>
+        
+        <div class="stat-box">
+            <div class="stat-box-title">⏱️ DURÉE MOYENNE</div>
+            <div class="stat-box-line">
+                <span class="stat-value" id="stat-avg-duration">-</span>
+            </div>
+            <div class="stat-subtitle">(par cycle)</div>
+        </div>
+    </div>
+    
+    <hr class="stats-separator">
+    
+    <!-- LIGNE 2 : Puissance + Intensité -->
+    <div class="stats-grid">
+        <div class="stat-box">
+            <div class="stat-box-title">💪 PUISSANCE (W)</div>
+            <div class="stat-box-line">
+                <span class="stat-value" id="stat-median-power">-</span> (médiane)
+            </div>
+            <div class="stat-box-line stat-subtitle">
+                Plage: <span id="stat-power-range">-</span>
+            </div>
+        </div>
+        
+        <div class="stat-box">
+            <div class="stat-box-title">📈 INTENSITÉ (A)</div>
+            <div class="stat-box-line">
+                <span class="stat-value" id="stat-median-ampere">-</span> (médiane)
+            </div>
+            <div class="stat-box-line stat-subtitle">
+                Plage: <span id="stat-ampere-range">-</span>
+            </div>
+        </div>
+    </div>
+</div>
+B. JAVASCRIPT : Calcul de la médiane
+Ajouter cette fonction utilitaire :
+// Fonction pour calculer la médiane d'un tableau
+function calculateMedian(values) {
+    if (values.length === 0) return 0;
+    
+    // Trier les valeurs
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    
+    // Si nombre pair de valeurs, prendre la moyenne des 2 valeurs centrales
+    if (sorted.length % 2 === 0) {
+        return (sorted[mid - 1] + sorted[mid]) / 2;
+    } else {
+        return sorted[mid];
+    }
+}
+C. JAVASCRIPT : Mise à jour de updateCompactStats()
+REMPLACER la fonction updateCompactStats() par :
+function updateCompactStats(cycles) {
+    // Total cycles
+    document.getElementById('stat-total-cycles').textContent = cycles.length;
+    
+    // Cycles en cours
+    const running = cycles.filter(c => !c.end_time).length;
+    document.getElementById('stat-running').textContent = running;
+    
+    // Cycles complétés (pour les calculs)
+    const completedCycles = cycles.filter(c => c.end_time);
+    
+    // Durée moyenne
+    const avgDuration = completedCycles.length > 0
+        ? Math.round(completedCycles.reduce((sum, c) => sum + c.duration_minutes, 0) / completedCycles.length)
+        : 0;
+    document.getElementById('stat-avg-duration').textContent = `${avgDuration} min`;
+    
+    // ✅ MÉDIANE PUISSANCE (au lieu de moyenne)
+    const allPowerValues = completedCycles
+        .map(c => c.avg_power_w)
+        .filter(p => p != null && p > 0);
+    
+    const medianPower = allPowerValues.length > 0
+        ? Math.round(calculateMedian(allPowerValues))
+        : 0;
+    document.getElementById('stat-median-power').textContent = medianPower;
+    
+    // ✅ MÉDIANE INTENSITÉ (au lieu de moyenne)
+    const allAmpereValues = [];
+    completedCycles.forEach(c => {
+        if (c.min_ampere != null) allAmpereValues.push(c.min_ampere);
+        if (c.max_ampere != null) allAmpereValues.push(c.max_ampere);
+    });
+    
+    const medianAmpere = allAmpereValues.length > 0
+        ? calculateMedian(allAmpereValues).toFixed(1)
+        : 0;
+    document.getElementById('stat-median-ampere').textContent = medianAmpere;
+    
+    // Plage Puissance (Min - Max)
+    const allWatts = cycles.flatMap(c => [c.min_watt, c.max_watt]).filter(w => w != null);
+    const minW = allWatts.length > 0 ? Math.round(Math.min(...allWatts)) : '-';
+    const maxW = allWatts.length > 0 ? Math.round(Math.max(...allWatts)) : '-';
+    document.getElementById('stat-power-range').textContent = `${minW} - ${maxW} W`;
+    
+    // Plage Intensité (Min - Max)
+    const allAmperes = cycles.flatMap(c => [c.min_ampere, c.max_ampere]).filter(a => a != null);
+    const minA = allAmperes.length > 0 ? Math.min(...allAmperes).toFixed(1) : '-';
+    const maxA = allAmperes.length > 0 ? Math.max(...allAmperes).toFixed(1) : '-';
+    document.getElementById('stat-ampere-range').textContent = `${minA} - ${maxA} A`;
+}
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST POST-BUILD
+═══════════════════════════════════════════════════════════════════════════════
+HTML/CSS :
+☐ Grid 2×2 avec gap de 30px
+☐ Séparateur horizontal entre lignes
+☐ Emojis : 📊 ⏱️ 💪 📈
+☐ Labels clairs : "CYCLES", "DURÉE MOYENNE", "PUISSANCE (W)", "INTENSITÉ (A)"
+☐ Sous-titre "(par cycle)" sous la durée
+☐ Mention "(médiane)" après les valeurs
+JavaScript :
+☐ Fonction calculateMedian() ajoutée
+☐ stat-median-power : Médiane des avg_power_w
+☐ stat-median-ampere : Médiane des min/max amperes
+☐ stat-power-range : "Min - Max W"
+☐ stat-ampere-range : "Min - Max A"
+Tests visuels :
+☐ Structure 2×2 bien alignée
+☐ Séparateur visible entre les 2 lignes
+☐ Labels en gras et uppercase
+☐ Valeurs principales en gros (18px)
+☐ Sous-textes en petit (13px)
+☐ "Plage:" visible et clair
+Tests fonctionnels :
+☐ Médiane puissance cohérente (proche mais différente de la moyenne)
+☐ Médiane intensité calculée correctement
+☐ Plages Min-Max identiques à avant
+☐ Durée moyenne inchangée
+═══════════════════════════════════════════════════════════════════════════════
+📊 EXEMPLE RENDU ATTENDU
+═══════════════════════════════════════════════════════════════════════════════
+Avec les données de la capture d'écran :
+┌─────────────────────────────────────────────────────────────────┐
+│  SYNTHÈSE DES CYCLES                                            │
+│                                                                 │
+│  📊 CYCLES              ⏱️ DURÉE MOYENNE                         │
+│  481 total              8 min                                   │
+│  0 en cours             (par cycle)                             │
+│                                                                 │
+│  ────────────────────────────────────────────────────────────   │
+│                                                                 │
+│  💪 PUISSANCE (W)       📈 INTENSITÉ (A)                        │
+│  1196 W (médiane)       5.4 A (médiane)                         │
+│  Plage: 827 - 2061 W    Plage: 3.6 - 10.9 A                    │
+└─────────────────────────────────────────────────────────────────┘
+═══════════════════════════════════════════════════════════════════════════════
+💡 NOTES TECHNIQUES
+═══════════════════════════════════════════════════════════════════════════════
+CALCUL MÉDIANE PUISSANCE
+Prendre avg_power_w de tous les cycles complétés
+Trier les valeurs
+Prendre la valeur centrale (ou moyenne des 2 centrales si nombre pair)
+CALCUL MÉDIANE INTENSITÉ
+Collecter toutes les valeurs min_ampere et max_ampere
+Calculer la médiane de cet ensemble
+Alternative : Calculer médiane(min) et médiane(max) séparément
+POURQUOI LA MÉDIANE ?
+Résistante aux valeurs extrêmes (pics de démarrage)
+Représente mieux la "valeur typique" de fonctionnement
+Plus stable dans le temps pour détecter les dérives
+LABELS EXPLICITES
+"par cycle" évite confusion avec durée totale
+"médiane" clarifie qu'il ne s'agit pas de la moyenne
+"Plage:" explicite que ce sont les extrêmes
+
+---
+
+## 🎯 RÉSUMÉ DES CHANGEMENTS
+
+### **Structure** :
+- ✅ Grid 2×2 au lieu d'une seule ligne
+- ✅ Séparateur horizontal entre les 2 lignes
+
+### **Labels** :
+- ✅ "DURÉE MOYENNE" + "(par cycle)"
+- ✅ "1196 W (médiane)" au lieu de "1196 W moy."
+- ✅ "Plage: 827 - 2061 W" au lieu de "827 - 2061 W"
+
+### **Calculs** :
+- ✅ Médiane puissance (au lieu de moyenne)
+- ✅ Médiane intensité (au lieu de moyenne)
+- ✅ Min/Max inchangés (toujours utiles)
+
+---
