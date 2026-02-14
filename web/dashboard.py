@@ -244,6 +244,31 @@ def render_dashboard() -> str:
             color: #7f8c8d;
         }
 
+        .sort-icon {
+            opacity: 0.3;
+            font-size: 0.8rem;
+            margin-left: 4px;
+        }
+
+        .sort-icon::after {
+            content: '\\2195';
+        }
+
+        th {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        th:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        th.sorted-asc .sort-icon { opacity: 1; }
+        th.sorted-asc .sort-icon::after { content: '\\25B2'; }
+
+        th.sorted-desc .sort-icon { opacity: 1; }
+        th.sorted-desc .sort-icon::after { content: '\\25BC'; }
+
         .device-id-cell {
             font-size: 0.85rem;
             color: #7f8c8d;
@@ -351,6 +376,25 @@ def render_dashboard() -> str:
             </div>
         </div>
 
+        <div class="stats">
+            <div class="stat-card">
+                <div class="label">Max Amperes</div>
+                <div class="value" id="stat-max-current">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Min Amperes</div>
+                <div class="value" id="stat-min-current">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Max Watts</div>
+                <div class="value" id="stat-max-power">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Min Watts</div>
+                <div class="value" id="stat-min-power">-</div>
+            </div>
+        </div>
+
         <div class="table-container">
             <div id="loading" class="loading">
                 <div class="spinner"></div>
@@ -361,13 +405,13 @@ def render_dashboard() -> str:
                 <table>
                     <thead>
                         <tr>
-                            <th>Device</th>
-                            <th>Canal</th>
-                            <th>Date</th>
-                            <th>Demarrage</th>
-                            <th>Arret</th>
-                            <th>Duree</th>
-                            <th>Puissance moy.</th>
+                            <th onclick="sortTable('device_id', 0)">Device <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('channel', 1)">Canal <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('start_time', 2)">Date <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('start_time', 3)">Demarrage <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('end_time', 4)">Arret <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('duration_minutes', 5)">Duree <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('avg_power_w', 6)">Puissance moy. <span class="sort-icon"></span></th>
                         </tr>
                     </thead>
                     <tbody id="cycles-tbody">
@@ -383,6 +427,8 @@ def render_dashboard() -> str:
 
     <script>
         let currentData = null;
+        let originalCycles = null;
+        let currentSort = { column: null, direction: 'asc' };
 
         document.addEventListener('DOMContentLoaded', () => {
             const today = new Date();
@@ -486,6 +532,7 @@ def render_dashboard() -> str:
                 const data = await response.json();
 
                 currentData = data;
+                originalCycles = data.cycles.slice();
 
                 document.getElementById('loading').style.display = 'none';
 
@@ -592,6 +639,64 @@ def render_dashboard() -> str:
             document.getElementById('stat-ongoing').textContent = ongoing;
             document.getElementById('stat-avg-duration').textContent = avgDuration + ' min';
             document.getElementById('stat-avg-power').textContent = avgPower + ' W';
+
+            if (currentData && currentData.stats) {
+                var s = currentData.stats;
+                document.getElementById('stat-max-current').textContent = s.max_current + ' A';
+                document.getElementById('stat-min-current').textContent = s.min_current + ' A';
+                document.getElementById('stat-max-power').textContent = s.max_power + ' W';
+                document.getElementById('stat-min-power').textContent = s.min_power + ' W';
+            } else {
+                document.getElementById('stat-max-current').textContent = '-';
+                document.getElementById('stat-min-current').textContent = '-';
+                document.getElementById('stat-max-power').textContent = '-';
+                document.getElementById('stat-min-power').textContent = '-';
+            }
+        }
+
+        function sortTable(column, thIndex) {
+            if (!currentData || !currentData.cycles.length) return;
+
+            if (currentSort.column === column && currentSort.thIndex === thIndex) {
+                if (currentSort.direction === 'desc') {
+                    currentSort.direction = 'asc';
+                } else {
+                    currentSort.column = null;
+                    currentSort.thIndex = null;
+                    currentSort.direction = 'asc';
+                    renderTable(originalCycles || currentData.cycles);
+                    updateSortIcons();
+                    return;
+                }
+            } else {
+                currentSort.column = column;
+                currentSort.thIndex = thIndex;
+                currentSort.direction = 'desc';
+            }
+
+            var sorted = (originalCycles || currentData.cycles).slice().sort(function(a, b) {
+                var valA = a[column];
+                var valB = b[column];
+                if (valA == null) return 1;
+                if (valB == null) return -1;
+                var mult = currentSort.direction === 'asc' ? 1 : -1;
+                return valA > valB ? mult : valA < valB ? -mult : 0;
+            });
+
+            renderTable(sorted);
+            updateSortIcons();
+        }
+
+        function updateSortIcons() {
+            document.querySelectorAll('thead th').forEach(function(th) {
+                th.classList.remove('sorted-asc', 'sorted-desc');
+            });
+            if (currentSort.thIndex != null) {
+                var ths = document.querySelectorAll('thead th');
+                if (ths[currentSort.thIndex]) {
+                    ths[currentSort.thIndex].classList.add('sorted-' + currentSort.direction);
+                }
+            }
         }
 
         function exportCSV() {

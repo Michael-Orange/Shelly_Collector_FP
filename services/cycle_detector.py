@@ -15,16 +15,19 @@ def detect_cycles(
 
     has_device_id = len(records[0]) >= 4
 
+    has_current = len(records[0]) >= 5
+
     for record in records:
         timestamp = record[0]
         channel = record[1]
         apower = record[2]
         dev_id = record[3] if has_device_id else "unknown"
+        current = record[4] if has_current else 0
 
         key = (dev_id, channel)
         if key not in grouped:
             grouped[key] = []
-        grouped[key].append((timestamp, apower))
+        grouped[key].append((timestamp, apower, current))
 
     for (dev_id, channel), channel_records in grouped.items():
         if not channel_records:
@@ -34,10 +37,12 @@ def detect_cycles(
 
         cycle_start = channel_records[0][0]
         cycle_powers = [channel_records[0][1]]
+        cycle_currents = [channel_records[0][2]]
 
         for i in range(1, len(channel_records)):
             current_time = channel_records[i][0]
             current_power = channel_records[i][1]
+            current_amp = channel_records[i][2]
             previous_time = channel_records[i - 1][0]
 
             gap_minutes = (current_time - previous_time).total_seconds() / 60
@@ -48,6 +53,7 @@ def detect_cycles(
 
                 if cycle_duration >= min_duration_minutes:
                     avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
+                    avg_current = sum(cycle_currents) / len(cycle_currents) if cycle_currents else 0
 
                     cycles.append({
                         "device_id": dev_id,
@@ -56,14 +62,17 @@ def detect_cycles(
                         "end_time": cycle_end,
                         "duration_minutes": round(cycle_duration, 1),
                         "avg_power_w": round(avg_power, 1),
+                        "avg_current_a": round(avg_current, 2),
                         "records_count": len(cycle_powers),
                         "is_ongoing": False
                     })
 
                 cycle_start = current_time
                 cycle_powers = [current_power]
+                cycle_currents = [current_amp]
             else:
                 cycle_powers.append(current_power)
+                cycle_currents.append(current_amp)
 
         if cycle_powers:
             cycle_end = channel_records[-1][0]
@@ -74,6 +83,7 @@ def detect_cycles(
 
             if cycle_duration >= min_duration_minutes or is_ongoing:
                 avg_power = sum(cycle_powers) / len(cycle_powers) if cycle_powers else 0
+                avg_current = sum(cycle_currents) / len(cycle_currents) if cycle_currents else 0
 
                 cycles.append({
                     "device_id": dev_id,
@@ -82,6 +92,7 @@ def detect_cycles(
                     "end_time": cycle_end if not is_ongoing else None,
                     "duration_minutes": round(cycle_duration, 1),
                     "avg_power_w": round(avg_power, 1),
+                    "avg_current_a": round(avg_current, 2),
                     "records_count": len(cycle_powers),
                     "is_ongoing": is_ongoing
                 })

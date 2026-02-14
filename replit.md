@@ -4,7 +4,14 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-13 (Latest)**: Admin config page for custom device/channel names:
+**2026-02-14 (Latest)**: Dashboard KPI min/max + tri colonnes :
+- **Cycle detector**: Calcule `avg_current_a` par cycle (requête SQL inclut `current_a`)
+- **API**: `/api/pump-cycles` retourne `stats` (max_current, min_current, max_power, min_power)
+- **Dashboard**: 4 nouveaux KPI (Max/Min Ampères, Max/Min Watts) — total 8 cartes
+- **Dashboard**: Colonnes du tableau triables (clic en-tête : desc → asc → reset)
+- **Dashboard**: Dropdowns Device/Canal chargés dynamiquement avec noms custom
+
+**2026-02-13**: Admin config page for custom device/channel names:
 - **New**: `services/config_service.py` - CRUD for device/channel name mappings
 - **New**: `web/admin.py` - Admin page at `/admin` for editing device/channel names
 - **New**: `device_config` table created automatically at startup (no manual migration)

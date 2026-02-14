@@ -37,7 +37,7 @@ async def get_pump_cycles(
             end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
 
         query = """
-            SELECT timestamp, channel, apower_w, device_id
+            SELECT timestamp, channel, apower_w, device_id, current_a
             FROM power_logs
             WHERE timestamp >= $1 AND timestamp <= $2
         """
@@ -58,7 +58,7 @@ async def get_pump_cycles(
 
         print(f"📊 API: Fetched {len(records)} records for cycle detection", flush=True)
 
-        records_list = [(r['timestamp'], r['channel'], r['apower_w'], r['device_id']) for r in records]
+        records_list = [(r['timestamp'], r['channel'], r['apower_w'], r['device_id'], r['current_a']) for r in records]
 
         cycles = detect_cycles(
             records_list,
@@ -81,10 +81,34 @@ async def get_pump_cycles(
 
         configs = await get_configs_map(db_pool)
 
+        stats = {
+            "max_current": 0,
+            "min_current": float('inf'),
+            "max_power": 0,
+            "min_power": float('inf')
+        }
+
+        for cycle in cycles:
+            pw = cycle.get('avg_power_w')
+            if pw is not None:
+                stats['max_power'] = max(stats['max_power'], pw)
+                stats['min_power'] = min(stats['min_power'], pw)
+            ca = cycle.get('avg_current_a')
+            if ca is not None:
+                stats['max_current'] = max(stats['max_current'], ca)
+                stats['min_current'] = min(stats['min_current'], ca)
+
+        if stats['min_current'] == float('inf'):
+            stats['min_current'] = 0
+        if stats['min_power'] == float('inf'):
+            stats['min_power'] = 0
+        stats = {k: round(v, 1) for k, v in stats.items()}
+
         return {
             "total": len(cycles),
             "device_ids": found_device_ids,
             "configs": configs,
+            "stats": stats,
             "filters": {
                 "device_id": device_id,
                 "channel": channel,
