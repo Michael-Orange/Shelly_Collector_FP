@@ -133,8 +133,8 @@ def render_dashboard() -> str:
         }
 
         .stats-card h3 {
-            margin: 0 0 18px 0;
-            font-size: 17px;
+            margin: 0 0 20px 0;
+            font-size: 18px;
             font-weight: 600;
             opacity: 0.95;
             letter-spacing: 0.5px;
@@ -143,31 +143,45 @@ def render_dashboard() -> str:
         .stats-separator {
             border: 0;
             border-top: 1px solid rgba(255, 255, 255, 0.25);
-            margin: 16px 0;
+            margin: 20px 0;
         }
 
-        .stats-line {
-            display: flex;
-            align-items: center;
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 30px;
-            font-size: 15px;
-            line-height: 1.6;
-            flex-wrap: wrap;
         }
 
-        .stats-line > div {
+        .stat-box {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             gap: 8px;
         }
 
-        .stat-emoji {
-            font-size: 20px;
+        .stat-box-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            opacity: 0.9;
+            margin-bottom: 10px;
         }
 
-        .stat-number {
+        .stat-box-line {
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        .stat-value {
             font-weight: bold;
             font-size: 18px;
+        }
+
+        .stat-subtitle {
+            font-size: 13px;
+            opacity: 0.85;
         }
 
         .treatment-card {
@@ -376,8 +390,12 @@ def render_dashboard() -> str:
                 padding: 0.7rem 0.5rem;
             }
 
-            .stats-line {
+            .stats-grid {
                 gap: 15px;
+            }
+
+            .stat-value {
+                font-size: 16px;
             }
 
             .treatment-stat-value {
@@ -428,33 +446,48 @@ def render_dashboard() -> str:
 
         <div class="stats-card">
             <h3>SYNTHESE DES CYCLES</h3>
-            <hr class="stats-separator">
-            <div class="stats-line">
-                <div>
-                    <span class="stat-emoji">&#x1F4CA;</span>
-                    <span><span class="stat-number" id="stat-total">-</span> cycles</span>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4CA; CYCLES</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-total">-</span> total
+                    </div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-ongoing">-</span> en cours
+                    </div>
                 </div>
-                <div>
-                    <span class="stat-emoji">&#x26A1;</span>
-                    <span><span class="stat-number" id="stat-ongoing">-</span> en cours</span>
-                </div>
-                <div>
-                    <span class="stat-emoji">&#x23F1;</span>
-                    <span><span class="stat-number" id="stat-avg-duration">-</span></span>
+
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x23F1;&#xFE0F; DUREE MOYENNE</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-avg-duration">-</span>
+                    </div>
+                    <div class="stat-subtitle">(par cycle)</div>
                 </div>
             </div>
-            <div class="stats-line" style="margin-top: 14px;">
-                <div>
-                    <span class="stat-emoji">&#x1F4AA;</span>
-                    <span><span class="stat-number" id="stat-avg-power">-</span> moy.</span>
+
+            <hr class="stats-separator">
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4AA; PUISSANCE (W)</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-median-power">-</span> (mediane)
+                    </div>
+                    <div class="stat-box-line stat-subtitle">
+                        Plage: <span id="stat-power-range">-</span>
+                    </div>
                 </div>
-                <div>
-                    <span class="stat-emoji">&#x1F4C8;</span>
-                    <span><span class="stat-number" id="stat-ampere-range">-</span></span>
-                </div>
-                <div>
-                    <span class="stat-emoji">&#x26A1;</span>
-                    <span><span class="stat-number" id="stat-watt-range">-</span></span>
+
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4C8; INTENSITE (A)</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-median-ampere">-</span> (mediane)
+                    </div>
+                    <div class="stat-box-line stat-subtitle">
+                        Plage: <span id="stat-ampere-range">-</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -696,8 +729,8 @@ def render_dashboard() -> str:
                 }
 
                 const durationStr = cycle.duration_minutes + ' min';
-                const powerStr = cycle.avg_power_w + ' W';
-                const currentStr = cycle.avg_current_a ? cycle.avg_current_a + ' A' : '-';
+                const powerStr = (cycle.avg_power_w != null ? parseFloat(cycle.avg_power_w).toFixed(1) : '-') + ' W';
+                const currentStr = cycle.avg_current_a ? parseFloat(cycle.avg_current_a).toFixed(1) + ' A' : '-';
 
                 row.innerHTML =
                     deviceCell +
@@ -713,32 +746,49 @@ def render_dashboard() -> str:
             });
         }
 
+        function calculateMedian(values) {
+            if (values.length === 0) return 0;
+            var sorted = values.slice().sort(function(a, b) { return a - b; });
+            var mid = Math.floor(sorted.length / 2);
+            if (sorted.length % 2 === 0) {
+                return (sorted[mid - 1] + sorted[mid]) / 2;
+            } else {
+                return sorted[mid];
+            }
+        }
+
         function updateStats(cycles) {
-            const total = cycles.length;
-            const ongoing = cycles.filter(c => c.is_ongoing).length;
-
-            let totalDuration = 0;
-            let totalPower = 0;
-            cycles.forEach(c => {
-                totalDuration += c.duration_minutes;
-                totalPower += c.avg_power_w;
-            });
-
-            const avgDuration = total > 0 ? Math.round(totalDuration / total) : 0;
-            const avgPower = total > 0 ? Math.round(totalPower / total) : 0;
+            var total = cycles.length;
+            var ongoing = cycles.filter(function(c) { return c.is_ongoing; }).length;
+            var completedCycles = cycles.filter(function(c) { return !c.is_ongoing; });
 
             document.getElementById('stat-total').textContent = total;
             document.getElementById('stat-ongoing').textContent = ongoing;
+
+            var avgDuration = completedCycles.length > 0
+                ? Math.round(completedCycles.reduce(function(sum, c) { return sum + c.duration_minutes; }, 0) / completedCycles.length)
+                : 0;
             document.getElementById('stat-avg-duration').textContent = avgDuration + ' min';
-            document.getElementById('stat-avg-power').textContent = avgPower + ' W';
+
+            var allPowerValues = completedCycles
+                .map(function(c) { return c.avg_power_w; })
+                .filter(function(p) { return p != null && p > 0; });
+            var medianPower = allPowerValues.length > 0 ? calculateMedian(allPowerValues).toFixed(1) : '0.0';
+            document.getElementById('stat-median-power').textContent = medianPower + ' W';
+
+            var allAmpereValues = completedCycles
+                .map(function(c) { return c.avg_current_a; })
+                .filter(function(a) { return a != null && a > 0; });
+            var medianAmpere = allAmpereValues.length > 0 ? calculateMedian(allAmpereValues).toFixed(1) : '0.0';
+            document.getElementById('stat-median-ampere').textContent = medianAmpere + ' A';
 
             if (currentData && currentData.stats) {
                 var s = currentData.stats;
-                document.getElementById('stat-ampere-range').textContent = s.min_current + ' - ' + s.max_current + ' A';
-                document.getElementById('stat-watt-range').textContent = s.min_power + ' - ' + s.max_power + ' W';
+                document.getElementById('stat-power-range').textContent = parseFloat(s.min_power).toFixed(1) + ' - ' + parseFloat(s.max_power).toFixed(1) + ' W';
+                document.getElementById('stat-ampere-range').textContent = parseFloat(s.min_current).toFixed(1) + ' - ' + parseFloat(s.max_current).toFixed(1) + ' A';
             } else {
+                document.getElementById('stat-power-range').textContent = '-';
                 document.getElementById('stat-ampere-range').textContent = '-';
-                document.getElementById('stat-watt-range').textContent = '-';
             }
 
             if (currentData && currentData.treatment_stats) {
@@ -821,8 +871,9 @@ def render_dashboard() -> str:
                     endTimeStr = '-';
                 }
 
-                var currentA = cycle.avg_current_a || '';
-                csv += deviceName + ';' + channelName + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + cycle.avg_power_w + ';' + currentA + ';' + status + '\\n';
+                var powerW = cycle.avg_power_w != null ? parseFloat(cycle.avg_power_w).toFixed(1) : '';
+                var currentA = cycle.avg_current_a ? parseFloat(cycle.avg_current_a).toFixed(1) : '';
+                csv += deviceName + ';' + channelName + ';' + dateStr + ';' + startTimeStr + ';' + endTimeStr + ';' + cycle.duration_minutes + ';' + powerW + ';' + currentA + ';' + status + '\\n';
             });
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
