@@ -1,0 +1,182 @@
+# OBJECTIF
+Ajouter endpoint HTTP /api/ingest/batch sécurisé pour recevoir messages Shelly depuis Cloudflare Queue, avec support 4 channels et déduplication minute bucket.
+
+# CONTEXTE
+- Application: Shelly Collector (monitoring IoT)
+- Architecture: Shelly → Cloudflare Queue (throttled) → Batch HTTP POST → Replit
+- Support multi-device avec 4 channels (0, 1, 2, 3)
+- Sécurité: Token API obligatoire (INGEST_API_KEY)
+
+# SPÉCIFICATIONS
+
+## 1. Migration base de données
+
+```sql
+ALTER TABLE power_logs ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
+-- Index partiel : uniqueness seulement pour non-NULL
+CREATE UNIQUE INDEX IF NOT EXISTS idx_power_logs_idempotency
+ON power_logs(idempotency_key)
+WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_power_logs_timestamp 
+ON power_logs(timestamp DESC);
+2. Prérequis
+Variable d'environnement INGEST_API_KEY déjà configurée dans Replit Secrets.
+3. Code endpoint POST /api/ingest/batch
+from fastapi import HTTPException, Header
+from pydantic import BaseModel, validator
+from typing import List
+from datetime import datetime, timezone
+import time
+import os
+
+class ShellyMessage(BaseModel):
+    src: str
+    timestamp: int
+    params: dict
+    
+    @validator('src')
+    def validate_src(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Device ID cannot be empty')
+        return v.strip()
+    
+    @validator('timestamp')
+    def validate_timestamp(cls, v):
+        if v <= 0 or v > time.time() + 86400:
+            raise ValueError('Invalid timestamp')
+        return v
+
+class BatchIngest(BaseModel):
+    messages: List[ShellyMessage]
+    
+    @validator('messages')
+    def validate_messages(cls, v):
+        if not v:
+            raise ValueError('Batch cannot be empty')
+        if len(v) > 1000:
+            raise ValueError('Batch too large (max 1000)')
+        return v
+
+@app.post("/api/ingest/batch")
+async def ingest_batch(
+    batch: BatchIngest,
+    x_api_key: str = Header(...)
+):
+    """Reçoit batch messages depuis Cloudflare Queue (sécurisé)"""
+    
+    # ✅ Vérification stricte du token
+    EXPECTED_TOKEN = os.getenv("INGEST_API_KEY")
+    if not EXPECTED_TOKEN:
+        logger.error("INGEST_API_KEY not configured in environment")
+        raise HTTPException(status_code=500, detail="Server configuration error")
+    
+    if x_api_key != EXPECTED_TOKEN:
+        logger.warning(f"Unauthorized batch ingest attempt")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    start_time = time.time()
+    inserted = 0
+    duplicates = 0
+    errors = 0
+    devices = set()
+    
+    async with db_pool.acquire() as conn:
+        # ✅ Transaction pour atomicité
+        async with conn.transaction():
+            for msg in batch.messages:
+                device_id = msg.src
+                devices.add(device_id)
+                ts = datetime.fromtimestamp(msg.timestamp, tz=timezone.utc)
+                minute_epoch = msg.timestamp // 60
+                
+                for ch_num in [0, 1, 2, 3]:
+                    switch_data = msg.params.get(f"switch:{ch_num}")
+                    
+                    # ✅ Validation type
+                    if not switch_data or not isinstance(switch_data, dict):
+                        continue
+                    
+                    power = switch_data.get("apower")
+                    if power is None:
+                        continue
+                    
+                    voltage = switch_data.get("voltage")
+                    current = switch_data.get("current")
+                    idempotency_key = f"{device_id}_{ch_num}_{minute_epoch}"
+                    
+                    try:
+                        # ✅ fetchval pour récupérer l'ID (ou None si conflit)
+                        row_id = await conn.fetchval("""
+                            INSERT INTO power_logs 
+                            (device_id, channel, power, voltage, current, timestamp, idempotency_key)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            ON CONFLICT (idempotency_key) DO NOTHING
+                            RETURNING id
+                        """, device_id, ch_num, power, voltage, current, ts, idempotency_key)
+                        
+                        if row_id is None:
+                            duplicates += 1
+                        else:
+                            inserted += 1
+                            
+                    except Exception as e:
+                        logger.error(f"Insert failed for {idempotency_key}: {e}")
+                        errors += 1
+    
+    processing_time = time.time() - start_time
+    logger.info(f"📥 Batch: {inserted} new, {duplicates} dup, {errors} err, "
+                f"{len(batch.messages)} msgs, {len(devices)} devices, {processing_time:.2f}s")
+    
+    return {
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "errors": errors,
+        "total_messages": len(batch.messages),
+        "devices": len(devices),
+        "processing_time": round(processing_time, 2)
+    }
+
+@app.get("/api/stats/queue")
+async def queue_stats():
+    """Stats insertions via queue (dernières 24h)"""
+    async with db_pool.acquire() as conn:
+        result = await conn.fetchrow("""
+            SELECT 
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE idempotency_key IS NOT NULL) as from_queue,
+                MAX(timestamp) as last_insert,
+                COUNT(DISTINCT device_id) as devices
+            FROM power_logs
+            WHERE timestamp > NOW() - INTERVAL '24 hours'
+        """)
+    
+    return {
+        "period": "24h",
+        "total_logs": result['total'],
+        "from_queue": result['from_queue'],
+        "devices": result['devices'],
+        "last_insert": result['last_insert'].isoformat() if result['last_insert'] else None
+    }
+4. Tests à effectuer
+POST sans token → 401 Unauthorized
+POST avec mauvais token → 401 Unauthorized
+POST avec bon token + 1 message → insertion OK
+POST même message 2 fois → 0 inserted, 1 duplicate
+POST batch 100 messages → compteurs corrects
+GET /api/stats/queue → JSON avec stats
+5. Points d'attention
+Token obligatoire : échec si INGEST_API_KEY non configuré
+UTC timezone partout
+minute_epoch = timestamp // 60
+fetchval() pour comptage fiable
+Transaction pour atomicité
+isinstance(dict) pour switch_data
+Logger avec nombre de devices
+RÉSULTAT ATTENDU
+Migration DB avec index partiel
+Endpoint /api/ingest/batch sécurisé (401 si pas de token)
+Endpoint /api/stats/queue
+Validation stricte et robuste
+Logs détaillés avec devices
