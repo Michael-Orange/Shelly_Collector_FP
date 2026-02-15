@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Query, HTTPException, Request
+from fastapi import APIRouter, Query, HTTPException, Request, Header
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel, validator
 import os
+import time
 import config
 from services.cycle_detector import detect_cycles
 from services.config_service import (
@@ -378,3 +380,139 @@ async def verify_export_password(request: Request):
     if not expected or password != expected:
         raise HTTPException(status_code=403, detail="Mot de passe incorrect")
     return {"success": True}
+
+
+class ShellyMessage(BaseModel):
+    src: str
+    timestamp: int
+    params: dict
+
+    @validator('src')
+    def validate_src(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Device ID cannot be empty')
+        return v.strip()
+
+    @validator('timestamp')
+    def validate_timestamp(cls, v):
+        if v <= 0 or v > time.time() + 86400:
+            raise ValueError('Invalid timestamp')
+        return v
+
+
+class BatchIngest(BaseModel):
+    messages: List[ShellyMessage]
+
+    @validator('messages')
+    def validate_messages(cls, v):
+        if not v:
+            raise ValueError('Batch cannot be empty')
+        if len(v) > 1000:
+            raise ValueError('Batch too large (max 1000)')
+        return v
+
+
+@router.post("/ingest/batch")
+async def ingest_batch(
+    batch: BatchIngest,
+    request: Request,
+    x_api_key: str = Header(...)
+):
+    expected_token = os.environ.get("INGEST_API_KEY")
+    if not expected_token:
+        print("\u274c INGEST_API_KEY not configured in environment", flush=True)
+        raise HTTPException(status_code=500, detail="Server configuration error")
+
+    if x_api_key != expected_token:
+        print(f"\u26a0\ufe0f Unauthorized batch ingest attempt", flush=True)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    start_time = time.time()
+    inserted = 0
+    duplicates = 0
+    errors = 0
+    devices = set()
+
+    db_pool = request.app.state.db_pool
+
+    async with db_pool.acquire() as conn:
+        for msg in batch.messages:
+            device_id = msg.src
+            devices.add(device_id)
+            ts = datetime.fromtimestamp(msg.timestamp, tz=timezone.utc)
+            minute_epoch = msg.timestamp // 60
+
+            for ch_num in [0, 1, 2, 3]:
+                switch_data = msg.params.get(f"switch:{ch_num}")
+
+                if not switch_data or not isinstance(switch_data, dict):
+                    continue
+
+                apower = switch_data.get("apower")
+                if apower is None:
+                    continue
+
+                voltage = switch_data.get("voltage", 0)
+                current = switch_data.get("current", 0)
+                energy_total = 0
+                aenergy = switch_data.get("aenergy")
+                if aenergy and isinstance(aenergy, dict):
+                    energy_total = aenergy.get("total", 0)
+
+                channel = f"switch:{ch_num}"
+                idempotency_key = f"{device_id}_{ch_num}_{minute_epoch}"
+
+                try:
+                    row_id = await conn.fetchval("""
+                        INSERT INTO power_logs
+                        (timestamp, device_id, channel, apower_w, voltage_v, current_a, energy_total_wh, idempotency_key)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+                        DO NOTHING
+                        RETURNING id
+                    """, ts, device_id, channel, apower, voltage, current, energy_total, idempotency_key)
+
+                    if row_id is None:
+                        duplicates += 1
+                    else:
+                        inserted += 1
+
+                except Exception as e:
+                    print(f"\u274c Insert failed for {idempotency_key}: {e}", flush=True)
+                    errors += 1
+
+    processing_time = time.time() - start_time
+    print(f"\U0001f4e5 Batch: {inserted} new, {duplicates} dup, {errors} err, "
+          f"{len(batch.messages)} msgs, {len(devices)} devices, {processing_time:.2f}s", flush=True)
+
+    return {
+        "inserted": inserted,
+        "duplicates": duplicates,
+        "errors": errors,
+        "total_messages": len(batch.messages),
+        "devices": len(devices),
+        "processing_time": round(processing_time, 2)
+    }
+
+
+@router.get("/stats/queue")
+async def queue_stats(request: Request):
+    db_pool = request.app.state.db_pool
+    async with db_pool.acquire() as conn:
+        result = await conn.fetchrow("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE idempotency_key IS NOT NULL) as from_queue,
+                MAX(timestamp) as last_insert,
+                COUNT(DISTINCT device_id) as devices
+            FROM power_logs
+            WHERE timestamp > NOW() - INTERVAL '24 hours'
+        """)
+
+    return {
+        "period": "24h",
+        "total_logs": result['total'],
+        "from_queue": result['from_queue'],
+        "devices": result['devices'],
+        "last_insert": result['last_insert'].strftime('%Y-%m-%dT%H:%M:%SZ') if result['last_insert'] else None
+    }
