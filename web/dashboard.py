@@ -1199,6 +1199,8 @@ def render_dashboard() -> str:
         let currentChartPeriod = '24h';
         let currentChartType = 'power';
         let lastChartData = null;
+        let userPickedDate = false;
+        let chartTimeBounds = null;
         const channelColors = [
             {bg: 'rgba(45, 134, 89, 0.3)', border: '#2d8659'},
             {bg: 'rgba(52, 152, 219, 0.3)', border: '#3498db'},
@@ -1226,6 +1228,7 @@ def render_dashboard() -> str:
                 alert('La date ne peut pas \\u00eatre dans le futur.');
                 input.value = today;
             }
+            userPickedDate = true;
             loadChartData();
         }
 
@@ -1234,6 +1237,7 @@ def render_dashboard() -> str:
             const today = new Date().toISOString().split('T')[0];
             input.value = today;
             input.max = today;
+            userPickedDate = false;
             loadChartData();
         }
 
@@ -1276,16 +1280,25 @@ def render_dashboard() -> str:
             section.style.display = 'block';
 
             const channel = document.getElementById('channel-filter').value;
-            const endDate = document.getElementById('chart-end-date').value;
             let url = '/api/power-chart-data?device_id=' + encodeURIComponent(deviceId) + '&period=' + currentChartPeriod;
             if (channel) url += '&channel=' + encodeURIComponent(channel);
-            if (endDate) url += '&end_date=' + encodeURIComponent(endDate);
+            if (userPickedDate) {
+                const endDate = document.getElementById('chart-end-date').value;
+                if (endDate) url += '&end_date=' + encodeURIComponent(endDate);
+            }
+
+            console.log('Chart request:', url, 'userPickedDate:', userPickedDate);
 
             try {
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
                 updateChartTitle(result.start_date, result.end_date);
+                chartTimeBounds = {
+                    min: new Date(result.start_time_iso),
+                    max: new Date(result.end_time_iso)
+                };
+                console.log('Chart bounds:', chartTimeBounds.min.toISOString(), '->', chartTimeBounds.max.toISOString());
                 lastChartData = result.data;
                 renderChart(result.data);
             } catch (e) {
@@ -1385,6 +1398,17 @@ def render_dashboard() -> str:
                 };
             }
 
+            const xScaleConfig = {
+                type: 'time',
+                time: xTimeConfig,
+                grid: { display: false },
+                ticks: xTicksConfig
+            };
+            if (chartTimeBounds) {
+                xScaleConfig.min = chartTimeBounds.min.getTime();
+                xScaleConfig.max = chartTimeBounds.max.getTime();
+            }
+
             powerChart = new Chart(canvas, {
                 type: 'line',
                 data: { datasets: datasets },
@@ -1411,12 +1435,7 @@ def render_dashboard() -> str:
                         }
                     },
                     scales: {
-                        x: {
-                            type: 'time',
-                            time: xTimeConfig,
-                            grid: { display: false },
-                            ticks: xTicksConfig
-                        },
+                        x: xScaleConfig,
                         y: {
                             type: 'linear',
                             position: 'left',

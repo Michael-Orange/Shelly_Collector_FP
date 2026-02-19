@@ -717,6 +717,8 @@ async def get_power_chart_data(
     db_pool = request.app.state.db_pool
 
     try:
+        print(f"🔍 DEBUG Chart - end_date param: {end_date!r}, period: {period}", flush=True)
+
         if end_date:
             try:
                 end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
@@ -734,6 +736,8 @@ async def get_power_chart_data(
         else:
             start_time = end_dt - timedelta(hours=24)
             period = "24h"
+
+        print(f"🔍 DEBUG Chart - end_dt: {end_dt.isoformat()}, start_time: {start_time.isoformat()}", flush=True)
 
         if channel and channel != "all":
             params = [device_id, start_time, end_dt, channel]
@@ -804,6 +808,8 @@ async def get_power_chart_data(
             "period": period,
             "start_date": start_date_str,
             "end_date": end_date_str,
+            "start_time_iso": start_time.isoformat(),
+            "end_time_iso": end_dt.isoformat(),
             "data": data_by_channel
         }
 
