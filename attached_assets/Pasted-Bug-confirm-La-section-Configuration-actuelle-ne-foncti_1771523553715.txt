@@ -1,0 +1,80 @@
+Bug confirmé : La section "Configuration actuelle" ne fonctionne pas.
+
+PROBLÈME : Quand je modifie le débit dans la section du haut et essaye de sauvegarder, rien ne se passe.
+
+DIAGNOSTIC À FAIRE :
+
+1. **Vérifier si le bouton existe** :
+   - Dans la section "Configuration actuelle", y a-t-il un bouton "Enregistrer" ou "Sauvegarder" ?
+   - Si non, c'est ça le problème : tu as créé le HTML du formulaire mais pas le bouton pour sauvegarder
+
+2. **Si le bouton existe, vérifier le JavaScript** :
+   - La fonction updateCurrentConfig(deviceId, channel) est-elle bien définie ?
+   - Le bouton est-il bien connecté avec onclick="updateCurrentConfig(...)" ?
+
+3. **Tester l'API manuellement** :
+   Dans le terminal, teste :
+   ```bash
+   curl -X PUT http://localhost:5000/api/config/current \
+     -H "Content-Type: application/json" \
+     -d '{
+       "device_id": "shellypro4pm-a0dd6c9ef474",
+       "channel": "switch:0",
+       "flow_rate": 20
+     }'
+Si ça retourne {"success": true}, l'API fonctionne et c'est le frontend qui a un problème.
+SOLUTION PROBABLE :
+Je pense que tu as oublié d'ajouter le bouton "Enregistrer" dans la section config actuelle. Voici le HTML qui devrait être là :
+<div class="current-config-form">
+    <h4>Configuration actuelle</h4>
+    <p class="info">💡 Modifications ici = mise à jour immédiate sans historique</p>
+    
+    <label>Débit (m³/h) :</label>
+    <input type="number" id="flow-rate-${deviceId}-${channel}" 
+           value="${config.flow_rate || ''}" step="0.1" />
+    
+    <!-- ... autres champs ... -->
+    
+    <!-- CE BOUTON DOIT ÊTRE LÀ : -->
+    <button onclick="updateCurrentConfig('${deviceId}', '${channel}')" 
+            class="btn-primary">
+        💾 Enregistrer la config actuelle
+    </button>
+</div>
+Et la fonction JS doit être présente :
+async function updateCurrentConfig(deviceId, channel) {
+    const data = {
+        device_id: deviceId,
+        channel: channel,
+        flow_rate: parseFloat(document.getElementById(`flow-rate-${deviceId}-${channel}`).value) || null,
+        pump_type: document.getElementById(`pump-type-${deviceId}-${channel}`).value,
+        dbo5: parseInt(document.getElementById(`dbo5-${deviceId}-${channel}`).value) || null,
+        dco: parseInt(document.getElementById(`dco-${deviceId}-${channel}`).value) || null,
+        mes: parseInt(document.getElementById(`mes-${deviceId}-${channel}`).value) || null
+    };
+    
+    try {
+        const response = await fetch('/api/config/current', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            alert('❌ Erreur : ' + error.detail);
+            return;
+        }
+        
+        alert('✅ Configuration mise à jour');
+        console.log('Config updated successfully');
+    } catch (e) {
+        alert('❌ Erreur réseau');
+        console.error(e);
+    }
+}
+Vérifie ces 3 éléments :
+Le bouton existe et est visible
+Le onclick pointe vers la bonne fonction
+La fonction updateCurrentConfig est définie dans le <script>
+Donne-moi le résultat.

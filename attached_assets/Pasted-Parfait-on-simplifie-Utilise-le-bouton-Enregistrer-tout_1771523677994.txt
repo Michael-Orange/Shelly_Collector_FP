@@ -1,0 +1,64 @@
+Parfait, on simplifie. Utilise le bouton "Enregistrer tout" existant pour sauvegarder AUSSI la config actuelle.
+
+SOLUTION : Modifier la fonction saveDevice() existante pour qu'elle fasse 2 choses :
+
+1. Sauvegarder le device (nom, etc.) via POST /api/config/device (déjà fait)
+2. Sauvegarder la config actuelle de CHAQUE canal via PUT /api/config/current (à ajouter)
+
+IMPLÉMENTATION :
+
+Dans la fonction saveDevice() (ou équivalent), AJOUTER après la sauvegarde du device :
+
+```javascript
+async function saveDevice() {
+    const deviceId = /* ... récupérer device_id ... */;
+    
+    // 1. Sauvegarder le device (déjà existant)
+    // ... code existant ...
+    
+    // 2. Sauvegarder la config actuelle de chaque canal
+    const channels = ['switch:0', 'switch:1', 'switch:2', 'switch:3'];
+    
+    for (const channel of channels) {
+        // Vérifier si les champs existent (le canal peut ne pas être configuré)
+        const flowRateInput = document.getElementById(`flow-rate-${deviceId}-${channel}`);
+        if (!flowRateInput) continue;
+        
+        const configData = {
+            device_id: deviceId,
+            channel: channel,
+            channel_name: document.getElementById(`name-${deviceId}-${channel}`)?.value || null,
+            pump_model_id: parseInt(document.getElementById(`pump-model-${deviceId}-${channel}`)?.value) || null,
+            flow_rate: parseFloat(flowRateInput.value) || null,
+            pump_type: document.getElementById(`pump-type-${deviceId}-${channel}`)?.value || null,
+            dbo5: parseInt(document.getElementById(`dbo5-${deviceId}-${channel}`)?.value) || null,
+            dco: parseInt(document.getElementById(`dco-${deviceId}-${channel}`)?.value) || null,
+            mes: parseInt(document.getElementById(`mes-${deviceId}-${channel}`)?.value) || null
+        };
+        
+        // Appeler PUT /api/config/current
+        try {
+            const response = await fetch('/api/config/current', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(configData)
+            });
+            
+            if (!response.ok) {
+                console.error(`Erreur sauvegarde config ${channel}:`, await response.json());
+            } else {
+                console.log(`✅ Config ${channel} sauvegardée`);
+            }
+        } catch (e) {
+            console.error(`Erreur réseau config ${channel}:`, e);
+        }
+    }
+    
+    alert('✅ Device et configurations sauvegardés');
+}
+IMPORTANT :
+Les IDs des champs (flow-rate-..., pump-type-..., dbo5-..., etc.) doivent correspondre à ceux dans le HTML
+Si un champ n'existe pas (canal pas configuré), skip ce canal
+Ne pas bloquer si une config échoue, continuer avec les autres canaux
+Un seul message de succès à la fin
+Implémente ça et teste en modifiant le débit de PR1 puis en cliquant "Enregistrer tout".
