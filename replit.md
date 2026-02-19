@@ -33,8 +33,9 @@ Core features include:
   - `web/templates/` — HTML templates (dashboard.html, admin.html, admin_pumps.html)
   - `web/static/css/` — Extracted stylesheets (dashboard.css, admin.css, admin_pumps.css)
   - `web/static/js/` — Extracted JavaScript (dashboard.js, admin.js, admin_pumps.js)
-  - Legacy fallback functions (`render_*_legacy()`) kept in `web/dashboard.py` and `web/admin.py` for safety
+  - Legacy fallback files (`web/dashboard.py`, `web/admin.py`) removed after template validation
   - StaticFiles mounted BEFORE API routes in main.py
+  - Cache-busting via `?v=N` query params on static file references
 - **Asynchronous Operations**: Leverages `asyncpg` for non-blocking database interactions.
 - **Robust Deduplication**: Implemented at the database level using a partial unique index on `idempotency_key`.
 - **Scalability**: Designed to handle batch ingestion efficiently, capable of processing up to 1000 messages per batch.

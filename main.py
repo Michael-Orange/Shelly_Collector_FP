@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import time
@@ -10,8 +10,6 @@ from services.database import create_db_pool, close_db_pool, create_tables
 from services.auth_service import verify_admin_token, is_admin_route
 from services.error_handler import generic_exception_handler, http_exception_handler
 from api.routes import router as api_router
-from web.dashboard import render_dashboard_legacy
-from web.admin import render_admin_legacy, render_pumps_admin_legacy
 
 app = FastAPI()
 
@@ -91,32 +89,14 @@ async def root():
     return "Shelly Collector running (Queue HTTP batch ingestion)"
 
 
-def html_response(content: str) -> HTMLResponse:
-    return HTMLResponse(
-        content=content,
-        headers={
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache"
-        }
-    )
-
-
 @app.get("/dashboard")
 async def dashboard(request: Request):
-    try:
-        return templates.TemplateResponse("dashboard.html", {"request": request}, headers={"Cache-Control": "no-cache"})
-    except Exception as e:
-        print(f"Template error, falling back to legacy: {e}", flush=True)
-        return html_response(render_dashboard_legacy())
+    return templates.TemplateResponse("dashboard.html", {"request": request}, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/admin")
 async def admin_page(request: Request):
-    try:
-        return templates.TemplateResponse("admin.html", {"request": request}, headers={"Cache-Control": "no-cache"})
-    except Exception as e:
-        print(f"Template error, falling back to legacy: {e}", flush=True)
-        return html_response(render_admin_legacy())
+    return templates.TemplateResponse("admin.html", {"request": request}, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/admin/pumps")
@@ -124,11 +104,7 @@ async def admin_pumps_page(request: Request):
     token = request.cookies.get("admin_session", "")
     if not verify_admin_token(token):
         return RedirectResponse(url="/admin", status_code=302)
-    try:
-        return templates.TemplateResponse("admin_pumps.html", {"request": request}, headers={"Cache-Control": "no-cache"})
-    except Exception as e:
-        print(f"Template error, falling back to legacy: {e}", flush=True)
-        return html_response(render_pumps_admin_legacy())
+    return templates.TemplateResponse("admin_pumps.html", {"request": request}, headers={"Cache-Control": "no-cache"})
 
 
 @app.on_event("startup")
