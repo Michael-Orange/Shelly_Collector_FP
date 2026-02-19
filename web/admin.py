@@ -262,11 +262,43 @@ def render_admin() -> str:
                         mes_mg_l: mesVal
                     })
                 });
-                if (res.ok) {
-                    showMsg('success', 'Configuration enregistr\\u00e9e !');
-                } else {
+                if (!res.ok) {
                     var errData = await res.json().catch(function() { return {}; });
                     showMsg('error', errData.detail || 'Erreur');
+                    return;
+                }
+
+                var configErrors = [];
+                for (var j = 0; j < channelData.length; j++) {
+                    var cd = channelData[j];
+                    try {
+                        var configRes = await fetch('/api/config/current', {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                device_id: deviceId,
+                                channel: cd.channel,
+                                channel_name: cd.name || null,
+                                pump_model_id: cd.pump_model_id,
+                                flow_rate: cd.flow_rate,
+                                pump_type: cd.pump_type,
+                                dbo5: dbo5Val,
+                                dco: dcoVal,
+                                mes: mesVal
+                            })
+                        });
+                        if (!configRes.ok) {
+                            configErrors.push(cd.channel);
+                        }
+                    } catch(ce) {
+                        configErrors.push(cd.channel);
+                    }
+                }
+
+                if (configErrors.length > 0) {
+                    showMsg('success', 'Device enregistr\\u00e9, mais erreur config versioning pour: ' + configErrors.join(', '));
+                } else {
+                    showMsg('success', 'Configuration enregistr\\u00e9e !');
                 }
             } catch(e) {
                 showMsg('error', 'Erreur r\\u00e9seau');

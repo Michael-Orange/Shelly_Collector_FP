@@ -201,7 +201,25 @@ async def update_current_config(
             SET {', '.join(updates)}
             WHERE device_id = $1 AND channel = $2 AND effective_to IS NULL
         """
-        await conn.execute(query, *params)
+        result = await conn.execute(query, *params)
+        rows_affected = int(result.split(" ")[-1]) if result else 0
+
+        if rows_affected == 0:
+            from datetime import date as date_type
+            await conn.execute("""
+                INSERT INTO device_config_versions (
+                    device_id, channel, channel_name, pump_model_id,
+                    flow_rate, pump_type, dbo5, dco, mes,
+                    effective_from, effective_to, version
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, 1)
+            """,
+                device_id, channel,
+                channel_name, pump_model_id,
+                flow_rate, pump_type or 'relevage',
+                dbo5, dco, mes,
+                date_type.today()
+            )
 
         dc_updates = []
         dc_params = [device_id, channel]
