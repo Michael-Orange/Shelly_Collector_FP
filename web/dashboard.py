@@ -762,7 +762,7 @@ def render_dashboard() -> str:
         <div id="chart-section" style="display:none;">
             <div class="chart-controls">
                 <div>
-                    <h3 class="chart-title" id="chart-main-title">&#x26A1; Consommation &#233;lectrique (W)</h3>
+                    <h3 class="chart-title" id="chart-main-title">&#x1F4CA; Activit&#233; &#233;lectrique</h3>
                     <span id="chart-date-range" class="chart-date-range"></span>
                 </div>
                 <div class="controls-right">
@@ -911,6 +911,7 @@ def render_dashboard() -> str:
         }
 
         async function loadCycles() {
+            syncChartDateWithMainFilter();
             const channel = document.getElementById('channel-filter').value;
             const deviceId = document.getElementById('device-filter').value;
             const startDate = document.getElementById('start-date').value;
@@ -947,6 +948,7 @@ def render_dashboard() -> str:
                 document.getElementById('table-wrapper').style.display = 'block';
                 renderTable(data.cycles);
                 updateStats(data.cycles);
+                loadChartData();
 
             } catch (error) {
                 console.error('Erreur:', error);
@@ -1204,13 +1206,18 @@ def render_dashboard() -> str:
             {bg: 'rgba(231, 76, 60, 0.3)', border: '#e74c3c'}
         ];
 
-        function initChartDatePicker() {
-            const input = document.getElementById('chart-end-date');
+        function syncChartDateWithMainFilter() {
+            const mainEndDate = document.getElementById('end-date');
+            const chartEndDate = document.getElementById('chart-end-date');
             const today = new Date().toISOString().split('T')[0];
-            input.value = today;
-            input.max = today;
+            chartEndDate.max = today;
+            if (mainEndDate && mainEndDate.value) {
+                chartEndDate.value = mainEndDate.value;
+            } else {
+                chartEndDate.value = today;
+            }
         }
-        initChartDatePicker();
+        syncChartDateWithMainFilter();
 
         function onChartDateChange() {
             const input = document.getElementById('chart-end-date');
@@ -1241,11 +1248,6 @@ def render_dashboard() -> str:
             currentChartType = type;
             document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            if (type === 'power') {
-                document.getElementById('chart-main-title').innerHTML = '&#x26A1; Consommation \\u00e9lectrique (W)';
-            } else {
-                document.getElementById('chart-main-title').innerHTML = '&#x1F50C; Courant (A)';
-            }
             if (lastChartData) {
                 renderChart(lastChartData);
             } else {
@@ -1316,12 +1318,12 @@ def render_dashboard() -> str:
                     label: chLabel + ' (' + unit + ')',
                     data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData[dataKey][i]})),
                     borderColor: color.border,
-                    backgroundColor: color.bg,
-                    fill: true,
+                    backgroundColor: 'transparent',
+                    fill: false,
                     stepped: true,
                     tension: 0,
                     pointRadius: 0,
-                    borderWidth: 2,
+                    borderWidth: 2.5,
                     spanGaps: false
                 });
 
@@ -1410,7 +1412,6 @@ def render_dashboard() -> str:
             currentChartType = 'power';
             document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
             document.querySelector('.chart-tab[onclick*="power"]').classList.add('active');
-            document.getElementById('chart-main-title').innerHTML = '&#x26A1; Consommation \\u00e9lectrique (W)';
             loadChartData();
         });
         document.getElementById('channel-filter').addEventListener('change', function() { loadChartData(); });
