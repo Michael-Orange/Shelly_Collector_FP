@@ -1215,8 +1215,10 @@ def render_dashboard() -> str:
             chartEndDate.max = today;
             if (mainEndDate && mainEndDate.value) {
                 chartEndDate.value = mainEndDate.value;
+                userPickedDate = (mainEndDate.value !== today);
             } else {
                 chartEndDate.value = today;
+                userPickedDate = false;
             }
         }
         syncChartDateWithMainFilter();
