@@ -131,13 +131,8 @@ def render_admin() -> str:
         checkExistingSession();
 
         async function adminLogout() {
-            try {
-                await fetch('/api/admin/logout', { method: 'POST' });
-            } catch(e) {}
-            document.getElementById('admin-content').style.display = 'none';
-            document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('admin-password').value = '';
-            document.getElementById('admin-password').focus();
+            try { await fetch('/api/admin/logout', { method: 'POST' }); } catch(e) {}
+            window.location.href = '/dashboard';
         }
 
         async function adminLogin() {
@@ -680,7 +675,7 @@ def render_pumps_admin() -> str:
     <script>
         async function adminLogout() {
             try { await fetch('/api/admin/logout', { method: 'POST' }); } catch(e) {}
-            window.location.href = '/admin';
+            window.location.href = '/dashboard';
         }
 
         var pumps = [];
