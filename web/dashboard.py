@@ -496,9 +496,51 @@ def render_dashboard() -> str:
             background: #234a30;
         }
 
+        .chart-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 0;
+        }
+
+        .chart-tab {
+            padding: 10px 20px;
+            border: 2px solid #2d5a3d;
+            background: white;
+            color: #2d5a3d;
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            flex: 1;
+            text-align: center;
+        }
+
+        .chart-tab:first-child {
+            border-radius: 8px 0 0 0;
+            border-right: 1px solid #2d5a3d;
+        }
+
+        .chart-tab:last-child {
+            border-radius: 0 8px 0 0;
+            border-left: 1px solid #2d5a3d;
+        }
+
+        .chart-tab:hover:not(.active) {
+            background: #f0f7f3;
+        }
+
+        .chart-tab.active {
+            background: #2d5a3d;
+            color: white;
+        }
+
         .chart-container {
             position: relative;
             height: 400px;
+            border: 2px solid #2d5a3d;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            padding: 15px;
         }
 
         @media (max-width: 768px) {
@@ -566,6 +608,11 @@ def render_dashboard() -> str:
 
             .period-selector {
                 justify-content: center;
+            }
+
+            .chart-tab {
+                padding: 8px 10px;
+                font-size: 0.8rem;
             }
         }
 
@@ -712,10 +759,10 @@ def render_dashboard() -> str:
             </div>
         </div>
 
-        <div id="chart-section">
+        <div id="chart-section" style="display:none;">
             <div class="chart-controls">
                 <div>
-                    <h3 class="chart-title">&#x26A1; Consommation &#233;lectrique</h3>
+                    <h3 class="chart-title" id="chart-main-title">&#x26A1; Consommation &#233;lectrique (W)</h3>
                     <span id="chart-date-range" class="chart-date-range"></span>
                 </div>
                 <div class="controls-right">
@@ -731,6 +778,10 @@ def render_dashboard() -> str:
                     </div>
                     <button class="btn-chart-export" onclick="exportChartPNG()">&#128247; PNG</button>
                 </div>
+            </div>
+            <div class="chart-tabs">
+                <button class="chart-tab active" onclick="switchChartType('power', this)">&#x26A1; Consommation &#233;lectrique (W)</button>
+                <button class="chart-tab" onclick="switchChartType('current', this)">&#x1F50C; Courant (A)</button>
             </div>
             <div class="chart-container">
                 <canvas id="powerChart"></canvas>
@@ -1144,6 +1195,8 @@ def render_dashboard() -> str:
         }
         let powerChart = null;
         let currentChartPeriod = '24h';
+        let currentChartType = 'power';
+        let lastChartData = null;
         const channelColors = [
             {bg: 'rgba(45, 134, 89, 0.3)', border: '#2d8659'},
             {bg: 'rgba(52, 152, 219, 0.3)', border: '#3498db'},
@@ -1184,6 +1237,22 @@ def render_dashboard() -> str:
             loadChartData();
         }
 
+        function switchChartType(type, btn) {
+            currentChartType = type;
+            document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (type === 'power') {
+                document.getElementById('chart-main-title').innerHTML = '&#x26A1; Consommation \\u00e9lectrique (W)';
+            } else {
+                document.getElementById('chart-main-title').innerHTML = '&#x1F50C; Courant (A)';
+            }
+            if (lastChartData) {
+                renderChart(lastChartData);
+            } else {
+                loadChartData();
+            }
+        }
+
         function updateChartTitle(startDate, endDate) {
             const el = document.getElementById('chart-date-range');
             if (!startDate || !endDate) { el.textContent = ''; return; }
@@ -1196,7 +1265,13 @@ def render_dashboard() -> str:
 
         async function loadChartData() {
             const deviceId = document.getElementById('device-filter').value;
-            if (!deviceId) return;
+            const section = document.getElementById('chart-section');
+
+            if (!deviceId) {
+                section.style.display = 'none';
+                return;
+            }
+            section.style.display = 'block';
 
             const channel = document.getElementById('channel-filter').value;
             const endDate = document.getElementById('chart-end-date').value;
@@ -1209,6 +1284,7 @@ def render_dashboard() -> str:
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
                 updateChartTitle(result.start_date, result.end_date);
+                lastChartData = result.data;
                 renderChart(result.data);
             } catch (e) {
                 console.error('Chart error:', e);
@@ -1219,10 +1295,17 @@ def render_dashboard() -> str:
             const canvas = document.getElementById('powerChart');
             if (powerChart) {
                 powerChart.destroy();
+                powerChart = null;
             }
 
             const datasets = [];
             let colorIdx = 0;
+            const isPower = currentChartType === 'power';
+            const dataKey = isPower ? 'power_w' : 'current_a';
+            const unit = isPower ? 'W' : 'A';
+            const labelSuffix = isPower ? 'Puissance' : 'Intensit\\u00e9';
+            const yAxisTitle = isPower ? 'Puissance (W)' : 'Intensit\\u00e9 (A)';
+            const yAxisColor = isPower ? '#2d8659' : '#3498db';
 
             Object.keys(data).sort().forEach(ch => {
                 const chData = data[ch];
@@ -1230,28 +1313,16 @@ def render_dashboard() -> str:
                 const chLabel = getChannelName(document.getElementById('device-filter').value, ch);
 
                 datasets.push({
-                    label: chLabel + ' (W)',
-                    data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData.power_w[i]})),
+                    label: chLabel + ' (' + unit + ')',
+                    data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData[dataKey][i]})),
                     borderColor: color.border,
                     backgroundColor: color.bg,
                     fill: true,
-                    tension: 0.3,
+                    stepped: true,
+                    tension: 0,
                     pointRadius: 0,
                     borderWidth: 2,
-                    yAxisID: 'y'
-                });
-
-                datasets.push({
-                    label: chLabel + ' (A)',
-                    data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData.current_a[i]})),
-                    borderColor: color.border,
-                    borderDash: [5, 5],
-                    backgroundColor: 'transparent',
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 1.5,
-                    yAxisID: 'y1'
+                    spanGaps: false
                 });
 
                 colorIdx++;
@@ -1316,16 +1387,10 @@ def render_dashboard() -> str:
                         y: {
                             type: 'linear',
                             position: 'left',
-                            title: { display: true, text: 'Puissance (W)', color: '#2d8659' },
+                            title: { display: true, text: yAxisTitle, color: yAxisColor },
                             beginAtZero: true,
+                            grace: '10%',
                             grid: { color: 'rgba(0,0,0,0.05)' }
-                        },
-                        y1: {
-                            type: 'linear',
-                            position: 'right',
-                            title: { display: true, text: 'Courant (A)', color: '#3498db' },
-                            beginAtZero: true,
-                            grid: { drawOnChartArea: false }
                         }
                     }
                 }
@@ -1335,12 +1400,19 @@ def render_dashboard() -> str:
         function exportChartPNG() {
             if (!powerChart) return;
             const link = document.createElement('a');
-            link.download = 'consommation_' + currentChartPeriod + '_' + new Date().toISOString().split('T')[0] + '.png';
+            const typeLabel = currentChartType === 'power' ? 'puissance' : 'courant';
+            link.download = 'filtreplante_' + typeLabel + '_' + currentChartPeriod + '_' + new Date().toISOString().split('T')[0] + '.png';
             link.href = document.getElementById('powerChart').toDataURL('image/png');
             link.click();
         }
 
-        document.getElementById('device-filter').addEventListener('change', function() { loadChartData(); });
+        document.getElementById('device-filter').addEventListener('change', function() {
+            currentChartType = 'power';
+            document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+            document.querySelector('.chart-tab[onclick*="power"]').classList.add('active');
+            document.getElementById('chart-main-title').innerHTML = '&#x26A1; Consommation \\u00e9lectrique (W)';
+            loadChartData();
+        });
         document.getElementById('channel-filter').addEventListener('change', function() { loadChartData(); });
     </script>
 </body>
