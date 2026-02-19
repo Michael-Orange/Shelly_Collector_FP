@@ -1,4 +1,4 @@
-def render_dashboard() -> str:
+def render_dashboard_legacy() -> str:
     return """
 <!DOCTYPE html>
 <html lang="fr">

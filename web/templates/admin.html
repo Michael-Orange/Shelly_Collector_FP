@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>FiltrePlante - Admin</title>
+    <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+    <div id="login-screen" class="login-overlay">
+        <div class="login-box">
+            <h2>&#x1F512; Configuration</h2>
+            <p>Entrez le mot de passe pour acc&eacute;der &agrave; la configuration.</p>
+            <div id="login-error" class="login-error">Mot de passe incorrect</div>
+            <input type="password" id="admin-password" placeholder="Mot de passe" autofocus
+                   onkeydown="if(event.key==='Enter') adminLogin();">
+            <button class="btn-login" onclick="adminLogin()">Acc&eacute;der</button>
+            <div style="margin-top:1rem;"><a href="/dashboard" style="color:#6b7280;font-size:0.9rem;">&#8592; Retour au dashboard</a></div>
+        </div>
+    </div>
+
+    <div id="admin-content" style="display:none;">
+        <div class="header">
+            <h1>FiltrePlante - Configuration</h1>
+            <div class="header-links">
+                <a href="/dashboard">&#8592; Retour au dashboard</a>
+                <a href="/admin/pumps" class="btn-manage-pumps">G&#233;rer les mod&#232;les de pompes</a>
+                <button class="btn-logout" onclick="adminLogout()">&#x1F6AA; Se d&#233;connecter</button>
+            </div>
+        </div>
+
+        <div class="container">
+            <div id="msg" class="msg"></div>
+            <div id="loading" class="loading">Chargement...</div>
+            <div id="devices"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/admin.js"></script>
+</body>
+</html>

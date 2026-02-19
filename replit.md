@@ -29,6 +29,12 @@ Core features include:
 ## System Design Choices
 
 - **Modular Architecture**: Services are separated into logical units (e.g., `database.py`, `cycle_detector.py`, `config_service.py`, `auth_service.py`) for maintainability.
+- **Template Architecture (Phase 2A)**: Frontend refactored from monolithic Python strings into Jinja2 templates + static CSS/JS files. Structure:
+  - `web/templates/` — HTML templates (dashboard.html, admin.html, admin_pumps.html)
+  - `web/static/css/` — Extracted stylesheets (dashboard.css, admin.css, admin_pumps.css)
+  - `web/static/js/` — Extracted JavaScript (dashboard.js, admin.js, admin_pumps.js)
+  - Legacy fallback functions (`render_*_legacy()`) kept in `web/dashboard.py` and `web/admin.py` for safety
+  - StaticFiles mounted BEFORE API routes in main.py
 - **Asynchronous Operations**: Leverages `asyncpg` for non-blocking database interactions.
 - **Robust Deduplication**: Implemented at the database level using a partial unique index on `idempotency_key`.
 - **Scalability**: Designed to handle batch ingestion efficiently, capable of processing up to 1000 messages per batch.
@@ -44,3 +50,4 @@ Core features include:
 - **uvicorn**: ASGI server.
 - **asyncpg**: Asynchronous PostgreSQL driver.
 - **pydantic**: Data validation library.
+- **jinja2**: Template engine for HTML rendering.

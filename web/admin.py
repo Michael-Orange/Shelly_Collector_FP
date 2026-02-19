@@ -1,4 +1,4 @@
-def render_admin() -> str:
+def render_admin_legacy() -> str:
     return """
 <!DOCTYPE html>
 <html lang="fr">
@@ -566,7 +566,7 @@ def render_admin() -> str:
     """
 
 
-def render_pumps_admin() -> str:
+def render_pumps_admin_legacy() -> str:
     return """
 <!DOCTYPE html>
 <html lang="fr">

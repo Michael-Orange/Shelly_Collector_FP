@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>FiltrePlante - Monitoring Pompes</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="header">
+        <h1><span>&#x1F331;</span> FiltrePlante - Suivi des Stations</h1>
+        <p>Analyse des cycles de pompage et impact environnemental | <a href="/admin" style="color:white;opacity:0.8;">Configuration</a></p>
+    </div>
+
+    <div class="container">
+        <div class="filters">
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="device-filter">Device</label>
+                    <select id="device-filter" onchange="loadChannelOptions()">
+                        <option value="">Tous les devices</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="channel-filter">Canal</label>
+                    <select id="channel-filter">
+                        <option value="">Tous les canaux</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="start-date">Date d&#233;but</label>
+                    <input type="date" id="start-date">
+                </div>
+
+                <div class="filter-group">
+                    <label for="end-date">Date fin</label>
+                    <input type="date" id="end-date">
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="btn-primary" onclick="loadCycles()">Rafra&#238;chir</button>
+                <button class="btn-secondary" onclick="exportCSV()">Exporter CSV</button>
+            </div>
+        </div>
+
+        <div class="stats-card">
+            <h3>SYNTH&#200;SE DES CYCLES</h3>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4CA; CYCLES</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-total">-</span> total
+                    </div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-ongoing">-</span> en cours
+                    </div>
+                </div>
+
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x23F1;&#xFE0F; DUR&#201;E MOYENNE</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-avg-duration">-</span>
+                    </div>
+                    <div class="stat-subtitle">(par cycle)</div>
+                </div>
+            </div>
+
+            <hr class="stats-separator">
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4AA; PUISSANCE (W)</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-median-power">-</span> (m&#233;diane)
+                    </div>
+                    <div class="stat-box-line stat-subtitle">
+                        Plage: <span id="stat-power-range">-</span>
+                    </div>
+                </div>
+
+                <div class="stat-box">
+                    <div class="stat-box-title">&#x1F4C8; INTENSIT&#201; (A)</div>
+                    <div class="stat-box-line">
+                        <span class="stat-value" id="stat-median-ampere">-</span> (m&#233;diane)
+                    </div>
+                    <div class="stat-box-line stat-subtitle">
+                        Plage: <span id="stat-ampere-range">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="treatment-card">
+            <h3>&#x1F4A7; TRAITEMENT &amp; IMPACT ENVIRONNEMENTAL</h3>
+            <div class="treatment-grid">
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F4CA; Eau us&#233;e trait&#233;e (p&#233;riode)</div>
+                    <div class="treatment-box-value" id="treated-water-value">--</div>
+                    <div class="treatment-box-unit">m&sup3;</div>
+                </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F4C5; Traitement journalier</div>
+                    <div class="treatment-box-value" id="treated-water-per-day">--</div>
+                    <div class="treatment-box-unit">m&sup3;/jour</div>
+                </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x1F331; CO&#x2082;e &#233;vit&#233; (p&#233;riode)</div>
+                    <div class="treatment-box-value" id="co2e-avoided">--</div>
+                    <div class="treatment-box-unit" id="co2e-unit">kg CO&sup2;e</div>
+                </div>
+                <div class="treatment-box">
+                    <div class="treatment-box-label">&#x2705; R&#233;duction</div>
+                    <div class="treatment-box-value" id="reduction-percent">--</div>
+                    <div class="treatment-box-unit">%</div>
+                </div>
+            </div>
+            <div class="treatment-info">
+                &#x2139;&#xFE0F; R&#233;duction d'&#233;missions par rapport &#224; une fosse standard (PRG CH&#x2084; = 28, GIEC AR5)
+            </div>
+        </div>
+
+        <div id="chart-section" style="display:none;">
+            <div class="chart-controls">
+                <div>
+                    <h3 class="chart-title" id="chart-main-title">&#x1F4CA; Activit&#233; &#233;lectrique</h3>
+                    <span id="chart-date-range" class="chart-date-range"></span>
+                </div>
+                <div class="controls-right">
+                    <div class="date-picker-group">
+                        <label>Jusqu'au :</label>
+                        <input type="date" id="chart-end-date" class="chart-date-input" onchange="onChartDateChange()">
+                        <button class="btn-reset-date" onclick="resetChartDate()" title="Revenir &#224; aujourd'hui">&#x21BB;</button>
+                    </div>
+                    <div class="period-selector">
+                        <button class="period-btn active" data-period="24h" onclick="setChartPeriod('24h', this)">24h</button>
+                        <button class="period-btn" data-period="7d" onclick="setChartPeriod('7d', this)">7 jours</button>
+                        <button class="period-btn" data-period="30d" onclick="setChartPeriod('30d', this)">30 jours</button>
+                    </div>
+                    <button class="btn-chart-export" onclick="exportChartPNG()">&#128247; PNG</button>
+                </div>
+            </div>
+            <div class="chart-tabs">
+                <button class="chart-tab active" onclick="switchChartType('power', this)">&#x26A1; Consommation &#233;lectrique (W)</button>
+                <button class="chart-tab" onclick="switchChartType('current', this)">&#x1F50C; Courant (A)</button>
+            </div>
+            <div class="chart-container">
+                <canvas id="powerChart"></canvas>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Chargement des donn&#233;es...</p>
+            </div>
+
+            <div id="table-wrapper" style="display: none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable('device_id', 0)">Device <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('channel', 1)">Canal <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('start_time', 2)">Date <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('start_time', 3)">D&#233;marrage <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('end_time', 4)">Arr&#234;t <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('duration_minutes', 5)">Dur&#233;e <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('avg_power_w', 6)">Puissance moy. <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('avg_current_a', 7)">Courant moy. <span class="sort-icon"></span></th>
+                            <th onclick="sortTable('avg_voltage_v', 8)">Voltage moy. <span class="sort-icon"></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="cycles-tbody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="empty" class="empty" style="display: none;">
+                <p>Aucun cycle trouv&#233; pour cette p&#233;riode</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

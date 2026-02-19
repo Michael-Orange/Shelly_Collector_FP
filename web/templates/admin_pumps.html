@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>FiltrePlante - Mod&#232;les de pompes</title>
+    <link rel="stylesheet" href="/static/css/admin_pumps.css">
+</head>
+<body>
+    <div class="header">
+        <h1>FiltrePlante - Mod&#232;les de pompes</h1>
+        <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
+            <a href="/admin">&#8592; Retour &#224; la configuration</a>
+            <button onclick="adminLogout()" style="background:rgba(255,255,255,0.15);padding:0.4rem 0.9rem;border-radius:6px;font-size:0.85rem;cursor:pointer;color:white;border:1px solid rgba(255,255,255,0.3);margin-left:auto;">&#x1F6AA; Se d&#233;connecter</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="msg" class="msg"></div>
+
+        <div class="card">
+            <h2 id="form-title">Ajouter un nouveau mod&#232;le</h2>
+            <form id="pump-form" onsubmit="handleSubmit(event)">
+                <input type="hidden" id="pump-id" value="">
+                <div class="form-row">
+                    <label>Nom du mod&#232;le *</label>
+                    <input type="text" id="pump-name" required placeholder="Ex: Pedrollo VXM 10/35">
+                </div>
+                <div class="form-row">
+                    <label>Puissance (kW) *</label>
+                    <input type="number" id="pump-power" step="0.01" min="0" required placeholder="Ex: 0.75">
+                </div>
+                <div class="form-row">
+                    <label>Intensit&#233; &#224; 230V (A) *</label>
+                    <input type="number" id="pump-current" step="0.1" min="0" required placeholder="Ex: 4.8">
+                </div>
+                <div class="form-row">
+                    <label>D&#233;bit &#224; HMT=8 (m3/h)</label>
+                    <input type="number" id="pump-flow" step="0.1" min="0" placeholder="Ex: 18.0 (vide si N/A)">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">Enregistrer</button>
+                    <button type="button" class="btn-cancel" onclick="resetForm()">Annuler</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Mod&#232;les existants</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nom</th>
+                        <th>Puissance (kW)</th>
+                        <th>Intensit&#233; (A)</th>
+                        <th>D&#233;bit (m3/h)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="pumps-tbody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/js/admin_pumps.js"></script>
+</body>
+</html>
