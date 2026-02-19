@@ -4,7 +4,15 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-19 (Latest)**: Admin session authentication :
+**2026-02-19 (Latest)**: Chart auto-fallback for empty periods :
+- **New**: Automatic 24h→7d period fallback when no data found in 24h view
+- **New**: Info banner with message when fallback activates (blue `.chart-info-banner`)
+- **New**: "Essayer 30 jours" button shown when 7d also has no data
+- **New**: Device change resets chart to 24h period and clears info messages
+- **New**: Manual period changes hide info banner (no auto-fallback on manual selection)
+- **Technical**: `periodOverride` parameter prevents infinite recursion, `period` variable used for 7d empty check
+
+**2026-02-19**: Admin session authentication :
 - **New**: HMAC-signed session cookie (`admin_session`) set on successful login (24h expiry)
 - **New**: `GET /api/admin/check-session` — verify session cookie validity
 - **New**: Server-side protection on `/admin/pumps` — redirects to `/admin` if not authenticated
