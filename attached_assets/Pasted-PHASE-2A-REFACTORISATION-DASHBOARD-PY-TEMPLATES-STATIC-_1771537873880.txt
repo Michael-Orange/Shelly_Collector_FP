@@ -1,0 +1,803 @@
+PHASE 2A : REFACTORISATION DASHBOARD.PY → TEMPLATES + STATIC FILES
+
+OBJECTIF : Séparer le monolithe dashboard.py (970 lignes) en templates HTML + fichiers statiques CSS/JS pour faciliter la maintenance et futures évolutions (graphiques Chart.js, dashboard client multi-tenant).
+
+PROBLÈME ACTUEL :
+- web/dashboard.py = 970 lignes de HTML/CSS/JS dans une seule string Python
+- Impossible à maintenir avec l'ajout de graphiques (200+ lignes JS supplémentaires à venir)
+- Pas de réutilisation possible pour futur dashboard client
+- Replit AI a du mal à naviguer dans ce monolithe
+- Coloration syntaxique et autocomplétion impossibles
+
+SOLUTION : Architecture templates + static files avec Jinja2 (déjà inclus dans FastAPI)
+
+═══════════════════════════════════════════════════════════════
+
+NOUVELLE STRUCTURE DE RÉPERTOIRES
+
+Créer cette arborescence :
+
+/web/
+  /templates/
+    base.html              # Template de base (layout commun)
+    dashboard.html         # Dashboard principal
+    admin.html             # Page admin (existante à migrer aussi)
+    admin_pumps.html       # Page config pompes
+    components/
+      filters.html         # Filtres device/canal/dates
+      chart.html           # Section graphique (futur)
+      cycles_table.html    # Tableau des cycles
+  /static/
+    /css/
+      main.css             # Styles globaux
+      dashboard.css        # Styles spécifiques dashboard
+      admin.css            # Styles admin
+    /js/
+      dashboard.js         # Logique dashboard
+      chart-config.js      # Configuration Chart.js (futur)
+      filters.js           # Gestion filtres
+    /images/
+      (si logos/icônes nécessaires)
+
+═══════════════════════════════════════════════════════════════
+
+ÉTAPE 1 : CONFIGURATION JINJA2
+
+Modifier web/dashboard.py :
+
+REMPLACER les imports en haut :
+```python
+# Ancienne version
+def render_dashboard() -> str:
+    return """<!DOCTYPE html>..."""
+
+# NOUVELLE VERSION
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
+from pathlib import Path
+
+# Initialiser Jinja2 avec le dossier templates
+templates = Jinja2Templates(directory="web/templates")
+
+def render_dashboard(request: Request, client_name: str = None, allowed_devices: list = None) -> str:
+    """
+    Rend le template dashboard avec contexte.
+    
+    Args:
+        request: Request FastAPI (requis par Jinja2)
+        client_name: Nom du client (pour vue multi-tenant future)
+        allowed_devices: Liste devices autorisés (pour filtrage client)
+    """
+    context = {
+        "request": request,
+        "is_client_view": client_name is not None,
+        "client_name": client_name,
+        "allowed_devices": allowed_devices or []
+    }
+    return templates.TemplateResponse("dashboard.html", context)
+Modifier main.py pour passer request :
+ANCIEN :
+@app.get("/dashboard")
+async def dashboard():
+    return html_response(render_dashboard())
+NOUVEAU :
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    return render_dashboard(request)
+═══════════════════════════════════════════════════════════════
+ÉTAPE 2 : CRÉER LE TEMPLATE DE BASE
+Créer web/templates/base.html :
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Dashboard{% endblock %} - FiltrePlante</title>
+    
+    <!-- Styles globaux -->
+    <link rel="stylesheet" href="/static/css/main.css">
+    
+    <!-- Styles spécifiques par page -->
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Navigation (si pas vue client) -->
+    {% if not is_client_view %}
+    <nav class="main-nav">
+        <div class="nav-container">
+            <h1>🌿 FiltrePlante - Shelly Collector</h1>
+            <div class="nav-links">
+                <a href="/dashboard">📊 Dashboard</a>
+                <a href="/admin">⚙️ Admin</a>
+            </div>
+        </div>
+    </nav>
+    {% else %}
+    <nav class="main-nav client-view">
+        <div class="nav-container">
+            <h1>🌿 FiltrePlante - {{ client_name }}</h1>
+        </div>
+    </nav>
+    {% endif %}
+    
+    <!-- Contenu principal -->
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    
+    <!-- Scripts globaux -->
+    <script src="/static/js/filters.js"></script>
+    
+    <!-- Scripts spécifiques par page -->
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
+═══════════════════════════════════════════════════════════════
+ÉTAPE 3 : CRÉER LE TEMPLATE DASHBOARD
+Créer web/templates/dashboard.html :
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/dashboard.css">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h2>📊 Tableau de bord</h2>
+    
+    <!-- Section Filtres -->
+    {% include 'components/filters.html' %}
+    
+    <!-- Section Graphique (future) -->
+    <div id="chart-section" style="display:none;">
+        {% include 'components/chart.html' %}
+    </div>
+    
+    <!-- Section Tableau des Cycles -->
+    {% include 'components/cycles_table.html' %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/dashboard.js"></script>
+<!-- Chart.js sera ajouté ici plus tard -->
+<!-- <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script> -->
+<!-- <script src="/static/js/chart-config.js"></script> -->
+{% endblock %}
+═══════════════════════════════════════════════════════════════
+ÉTAPE 4 : CRÉER LES COMPOSANTS
+4.1 Créer web/templates/components/filters.html :
+Extraire la section filtres du dashboard.py actuel :
+<div class="filters-section">
+    <div class="filters-row">
+        <div class="filter-group">
+            <label for="deviceFilter">Device</label>
+            <select id="deviceFilter">
+                <option value="all">Tous les devices</option>
+                <!-- Chargé dynamiquement via JS -->
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="channelFilter">Canal</label>
+            <select id="channelFilter">
+                <option value="all">Tous les canaux</option>
+                <!-- Chargé dynamiquement via JS -->
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="startDate">Date début</label>
+            <input type="date" id="startDate">
+        </div>
+        
+        <div class="filter-group">
+            <label for="endDate">Date fin</label>
+            <input type="date" id="endDate">
+        </div>
+        
+        <button id="refreshButton" class="btn-primary">Rafraîchir</button>
+    </div>
+    
+    {% if is_client_view %}
+    <p class="info-message">
+        ℹ️ Affichage limité aux devices autorisés
+    </p>
+    {% endif %}
+</div>
+4.2 Créer web/templates/components/chart.html (préparation future) :
+<div class="chart-wrapper">
+    <div class="chart-header">
+        <h3>📊 Activité électrique</h3>
+        <p class="date-range"></p>
+    </div>
+    
+    <div class="chart-controls">
+        <div class="date-selector">
+            <label for="chartEndDate">Jusqu'au :</label>
+            <input type="date" id="chartEndDate" />
+            <button id="resetDateBtn" class="btn-reset" title="Revenir à aujourd'hui">↻</button>
+        </div>
+        
+        <div class="period-selector">
+            <button class="period-btn active" data-period="24h">24h</button>
+            <button class="period-btn" data-period="7d">7 jours</button>
+            <button class="period-btn" data-period="30d">30 jours</button>
+        </div>
+        
+        <button id="exportChartBtn" class="btn-export">📥 PNG</button>
+    </div>
+    
+    <div class="chart-tabs">
+        <button class="chart-tab active" data-type="power">⚡ Consommation électrique (W)</button>
+        <button class="chart-tab" data-type="current">🔌 Courant (A)</button>
+    </div>
+    
+    <div class="chart-container">
+        <canvas id="powerChart"></canvas>
+    </div>
+</div>
+4.3 Créer web/templates/components/cycles_table.html :
+<div class="cycles-section">
+    <h3>🔄 Cycles de pompage</h3>
+    
+    <div class="info-banner">
+        👉 Faites défiler pour voir toutes les colonnes
+    </div>
+    
+    <div class="table-container">
+        <table id="cyclesTable">
+            <thead>
+                <tr>
+                    <th>Device</th>
+                    <th>Canal</th>
+                    <th>Date</th>
+                    <th>Démarrage</th>
+                    <th>Arrêt</th>
+                    <th>Durée</th>
+                    <th>Puissance moy.</th>
+                    <th>Volume pompé (m³)</th>
+                    <th>CO2e (kg)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Rempli dynamiquement via JS -->
+            </tbody>
+        </table>
+    </div>
+    
+    <div id="no-data-message" style="display:none;">
+        <p>Aucun cycle détecté pour cette période.</p>
+    </div>
+</div>
+═══════════════════════════════════════════════════════════════
+ÉTAPE 5 : EXTRAIRE LES STYLES CSS
+5.1 Créer web/static/css/main.css (styles globaux) :
+Extraire les styles communs du dashboard.py actuel (reset, body, navigation, etc.).
+/* Reset et base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f7fa;
+    color: #333;
+    line-height: 1.6;
+}
+
+/* Navigation */
+.main-nav {
+    background: #2d5a3d;
+    color: white;
+    padding: 1rem 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.nav-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-container h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.nav-links {
+    display: flex;
+    gap: 1.5rem;
+}
+
+.nav-links a {
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    transition: background 0.3s;
+}
+
+.nav-links a:hover {
+    background: rgba(255,255,255,0.1);
+}
+
+/* Vue client (pas de liens admin) */
+.main-nav.client-view .nav-container {
+    justify-content: center;
+}
+
+/* Conteneur principal */
+main {
+    max-width: 1400px;
+    margin: 2rem auto;
+    padding: 0 2rem;
+}
+
+/* Boutons globaux */
+.btn-primary {
+    padding: 0.6rem 1.5rem;
+    background: #2d5a3d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.3s;
+}
+
+.btn-primary:hover {
+    background: #1a5738;
+}
+
+.btn-reset {
+    padding: 0.4rem 0.8rem;
+    background: white;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-reset:hover {
+    background: #e9ecef;
+}
+
+/* Messages info */
+.info-message, .info-banner {
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    padding: 0.8rem;
+    margin: 1rem 0;
+    color: #004085;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .nav-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    main {
+        padding: 0 1rem;
+    }
+}
+5.2 Créer web/static/css/dashboard.css (spécifique dashboard) :
+Extraire tous les styles spécifiques au dashboard (filtres, tableau, graphiques).
+/* Section Dashboard */
+.dashboard-container {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.dashboard-container h2 {
+    color: #2d5a3d;
+    margin-bottom: 2rem;
+}
+
+/* Filtres */
+.filters-section {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.filters-row {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.filter-group label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: #495057;
+}
+
+.filter-group select,
+.filter-group input[type="date"] {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 1rem;
+}
+
+/* Tableau cycles */
+.cycles-section {
+    margin-top: 2rem;
+}
+
+.cycles-section h3 {
+    color: #2d5a3d;
+    margin-bottom: 1rem;
+}
+
+.table-container {
+    overflow-x: auto;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+#cyclesTable {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+#cyclesTable thead {
+    background: #2d5a3d;
+    color: white;
+}
+
+#cyclesTable th,
+#cyclesTable td {
+    padding: 0.8rem;
+    text-align: left;
+    border-bottom: 1px solid #dee2e6;
+}
+
+#cyclesTable tbody tr:hover {
+    background: #f8f9fa;
+}
+
+#cyclesTable tbody tr:last-child td {
+    border-bottom: none;
+}
+
+#no-data-message {
+    text-align: center;
+    padding: 3rem;
+    color: #6c757d;
+}
+
+/* Section graphique (pour futur Chart.js) */
+#chart-section {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.chart-wrapper {
+    /* Styles graphiques à venir */
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .filters-row {
+        flex-direction: column;
+    }
+    
+    .filter-group {
+        width: 100%;
+    }
+}
+═══════════════════════════════════════════════════════════════
+ÉTAPE 6 : EXTRAIRE LA LOGIQUE JAVASCRIPT
+6.1 Créer web/static/js/filters.js :
+Extraire toute la logique de gestion des filtres et chargement devices.
+// Gestion des filtres dashboard
+
+let currentDeviceFilter = 'all';
+let currentChannelFilter = 'all';
+
+document.addEventListener('DOMContentLoaded', function() {
+    initFilters();
+});
+
+async function initFilters() {
+    // Charger la liste des devices
+    await loadDevices();
+    
+    // Initialiser les dates par défaut
+    const today = new Date().toISOString().split('T')[0];
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const startDate = oneMonthAgo.toISOString().split('T')[0];
+    
+    document.getElementById('startDate').value = startDate;
+    document.getElementById('endDate').value = today;
+    
+    // Event listeners
+    document.getElementById('deviceFilter').addEventListener('change', handleDeviceChange);
+    document.getElementById('channelFilter').addEventListener('change', handleChannelChange);
+    document.getElementById('refreshButton').addEventListener('click', handleRefresh);
+}
+
+async function loadDevices() {
+    try {
+        const response = await fetch('/api/config/devices');
+        const data = await response.json();
+        
+        const deviceSelect = document.getElementById('deviceFilter');
+        deviceSelect.innerHTML = '<option value="all">Tous les devices</option>';
+        
+        data.devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.device_id;
+            option.textContent = device.device_name || device.device_id;
+            deviceSelect.appendChild(option);
+        });
+        
+    } catch (error) {
+        console.error('Erreur chargement devices:', error);
+    }
+}
+
+function handleDeviceChange() {
+    currentDeviceFilter = this.value;
+    // Recharger canaux si device spécifique sélectionné
+    loadChannels(currentDeviceFilter);
+    // Notifier le dashboard
+    if (typeof onFiltersChanged === 'function') {
+        onFiltersChanged();
+    }
+}
+
+function handleChannelChange() {
+    currentChannelFilter = this.value;
+    if (typeof onFiltersChanged === 'function') {
+        onFiltersChanged();
+    }
+}
+
+function handleRefresh() {
+    if (typeof onFiltersChanged === 'function') {
+        onFiltersChanged();
+    }
+}
+
+async function loadChannels(deviceId) {
+    const channelSelect = document.getElementById('channelFilter');
+    channelSelect.innerHTML = '<option value="all">Tous les canaux</option>';
+    
+    if (deviceId === 'all') return;
+    
+    try {
+        const response = await fetch(`/api/config/channels?device_id=${deviceId}`);
+        const data = await response.json();
+        
+        data.channels.forEach(channel => {
+            const option = document.createElement('option');
+            option.value = channel.channel;
+            option.textContent = channel.channel_name || channel.channel;
+            channelSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Erreur chargement canaux:', error);
+    }
+}
+
+// Exports pour utilisation externe
+function getFilters() {
+    return {
+        device: currentDeviceFilter,
+        channel: currentChannelFilter,
+        startDate: document.getElementById('startDate').value,
+        endDate: document.getElementById('endDate').value
+    };
+}
+6.2 Créer web/static/js/dashboard.js :
+Logique principale du dashboard (chargement cycles, etc.).
+// Dashboard principal
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Charger les données initiales
+    loadCycles();
+});
+
+// Callback appelé quand filtres changent
+function onFiltersChanged() {
+    loadCycles();
+}
+
+async function loadCycles() {
+    const filters = getFilters();
+    
+    // Construire URL API
+    let url = '/api/pump-cycles?';
+    const params = new URLSearchParams();
+    
+    if (filters.device !== 'all') {
+        params.append('devices', filters.device);
+    }
+    if (filters.channel !== 'all') {
+        params.append('channels', filters.channel);
+    }
+    if (filters.startDate) {
+        params.append('start_date', filters.startDate);
+    }
+    if (filters.endDate) {
+        params.append('end_date', filters.endDate);
+    }
+    
+    url += params.toString();
+    
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        displayCycles(data.cycles);
+    } catch (error) {
+        console.error('Erreur chargement cycles:', error);
+        showError('Erreur de chargement des données');
+    }
+}
+
+function displayCycles(cycles) {
+    const tbody = document.querySelector('#cyclesTable tbody');
+    const noDataMsg = document.getElementById('no-data-message');
+    
+    tbody.innerHTML = '';
+    
+    if (!cycles || cycles.length === 0) {
+        noDataMsg.style.display = 'block';
+        return;
+    }
+    
+    noDataMsg.style.display = 'none';
+    
+    cycles.forEach(cycle => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${cycle.device_name || cycle.device_id}</td>
+            <td>${cycle.channel_name || cycle.channel}</td>
+            <td>${formatDate(cycle.start_time)}</td>
+            <td>${formatTime(cycle.start_time)}</td>
+            <td>${formatTime(cycle.end_time)}</td>
+            <td>${cycle.duration_minutes} min</td>
+            <td>${cycle.avg_power_w.toFixed(0)} W</td>
+            <td>${cycle.volume_m3.toFixed(2)} m³</td>
+            <td>${cycle.co2e_kg.toFixed(3)} kg</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function formatDate(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleDateString('fr-FR');
+}
+
+function formatTime(isoString) {
+    const date = new Date(isoString);
+    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function showError(message) {
+    // TODO: Implémenter affichage d'erreur élégant
+    alert(message);
+}
+═══════════════════════════════════════════════════════════════
+ÉTAPE 7 : CONFIGURER FASTAPI POUR SERVIR LES STATIC FILES
+Dans main.py, ajouter après la création de l'app :
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+
+# Monter le dossier static
+app.mount("/static", StaticFiles(directory="web/static"), name="static")
+
+# ... reste du code ...
+═══════════════════════════════════════════════════════════════
+ÉTAPE 8 : MIGRATION PROGRESSIVE (IMPORTANT)
+8.1 GARDER L'ANCIEN CODE TEMPORAIREMENT
+Dans web/dashboard.py, ajouter une fonction de fallback :
+def render_dashboard_legacy() -> str:
+    """Ancienne version monolithe (backup)"""
+    return """<!DOCTYPE html>..."""  # Code actuel
+
+def render_dashboard(request: Request, client_name: str = None, allowed_devices: list = None):
+    """Nouvelle version avec templates"""
+    try:
+        # Essayer nouvelle version
+        context = {
+            "request": request,
+            "is_client_view": client_name is not None,
+            "client_name": client_name,
+            "allowed_devices": allowed_devices or []
+        }
+        return templates.TemplateResponse("dashboard.html", context)
+    except Exception as e:
+        print(f"⚠️ Erreur template, fallback legacy: {e}", flush=True)
+        # Fallback vers ancienne version
+        return render_dashboard_legacy()
+8.2 TESTER PROGRESSIVEMENT
+Phase de test :
+Créer tous les fichiers templates/static
+Tester /dashboard avec nouvelle version
+Si problème → le fallback marche
+Une fois validé → supprimer render_dashboard_legacy()
+═══════════════════════════════════════════════════════════════
+ÉTAPE 9 : MÊME CHOSE POUR ADMIN (OPTIONNEL MAIS RECOMMANDÉ)
+Répéter la structure pour web/admin.py :
+Créer templates/admin.html
+Créer templates/admin_pumps.html
+Créer static/css/admin.css
+Extraire JS dans static/js/admin.js
+Structure identique, mêmes principes.
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+DASHBOARD LOADING :
+Accès /dashboard → affiche correctement
+CSS chargé (styles visibles)
+JS chargé (filtres fonctionnels)
+FILTRES :
+Sélection device → charge canaux
+Sélection dates → met à jour données
+Clic rafraîchir → recharge tableau
+TABLEAU CYCLES :
+Données affichées correctement
+Formatage dates/heures OK
+Responsive mobile
+VUE CLIENT (PRÉPARATION MULTI-TENANT) :
+is_client_view=True → pas de liens admin visibles
+client_name affiché dans header
+FALLBACK :
+Si erreur template → fallback legacy fonctionne
+PERFORMANCE :
+Chargement < 500ms
+Pas de FOUC (flash of unstyled content)
+═══════════════════════════════════════════════════════════════
+AVANTAGES POST-REFACTORISATION
+✅ Code maintenable (HTML/CSS/JS séparés)
+✅ Réutilisation (base.html pour toutes les pages)
+✅ Prêt pour graphiques Chart.js (chart-config.js dédié)
+✅ Préparé pour multi-tenant (is_client_view)
+✅ Meilleure DX pour Replit AI (navigation fichiers)
+✅ Coloration syntaxe + autocomplétion
+✅ Hot reload fonctionnel (modif CSS/JS sans restart)
+═══════════════════════════════════════════════════════════════
+ORDRE D'IMPLÉMENTATION RECOMMANDÉ
+Créer structure répertoires (templates/, static/)
+Configurer FastAPI (StaticFiles + Jinja2Templates)
+Créer base.html
+Créer dashboard.html + components
+Extraire CSS dans main.css + dashboard.css
+Extraire JS dans filters.js + dashboard.js
+Modifier render_dashboard() avec fallback
+Tester /dashboard
+Valider → supprimer legacy code
+Répéter pour admin.html (optionnel)
+Mettre à jour replit.md
