@@ -17,6 +17,8 @@ def render_admin() -> str:
         .header a:hover { opacity: 1; }
         .btn-manage-pumps { background: rgba(255,255,255,0.2); padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; opacity: 1 !important; }
         .btn-manage-pumps:hover { background: rgba(255,255,255,0.3); }
+        .btn-logout { background: rgba(255,255,255,0.15); padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; color: white; border: 1px solid rgba(255,255,255,0.3); margin-left: auto; }
+        .btn-logout:hover { background: rgba(255,255,255,0.3); }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
         .device-card { background: white; border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 2px 6px rgba(0,0,0,0.05); border-left: 4px solid #2d8659; }
         .device-id { font-family: monospace; color: #7f8c8d; margin-bottom: 1rem; font-size: 0.9rem; }
@@ -100,6 +102,7 @@ def render_admin() -> str:
             <div class="header-links">
                 <a href="/dashboard">&#8592; Retour au dashboard</a>
                 <a href="/admin/pumps" class="btn-manage-pumps">G&#233;rer les mod&#232;les de pompes</a>
+                <button class="btn-logout" onclick="adminLogout()">&#x1F6AA; Se d&#233;connecter</button>
             </div>
         </div>
 
@@ -126,6 +129,16 @@ def render_admin() -> str:
             } catch(e) {}
         }
         checkExistingSession();
+
+        async function adminLogout() {
+            try {
+                await fetch('/api/admin/logout', { method: 'POST' });
+            } catch(e) {}
+            document.getElementById('admin-content').style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('admin-password').value = '';
+            document.getElementById('admin-password').focus();
+        }
 
         async function adminLogin() {
             var pw = document.getElementById('admin-password').value;
@@ -610,7 +623,10 @@ def render_pumps_admin() -> str:
 <body>
     <div class="header">
         <h1>FiltrePlante - Mod&#232;les de pompes</h1>
-        <a href="/admin">&#8592; Retour &#224; la configuration</a>
+        <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
+            <a href="/admin">&#8592; Retour &#224; la configuration</a>
+            <button onclick="adminLogout()" style="background:rgba(255,255,255,0.15);padding:0.4rem 0.9rem;border-radius:6px;font-size:0.85rem;cursor:pointer;color:white;border:1px solid rgba(255,255,255,0.3);margin-left:auto;">&#x1F6AA; Se d&#233;connecter</button>
+        </div>
     </div>
 
     <div class="container">
@@ -662,6 +678,11 @@ def render_pumps_admin() -> str:
     </div>
 
     <script>
+        async function adminLogout() {
+            try { await fetch('/api/admin/logout', { method: 'POST' }); } catch(e) {}
+            window.location.href = '/admin';
+        }
+
         var pumps = [];
 
         loadPumps();
