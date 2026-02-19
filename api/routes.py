@@ -729,13 +729,10 @@ async def get_power_chart_data(
 
         if period == "7d":
             start_time = end_dt - timedelta(days=7)
-            trunc_val = "10 minutes"
         elif period == "30d":
             start_time = end_dt - timedelta(days=30)
-            trunc_val = "1 hour"
         else:
             start_time = end_dt - timedelta(hours=24)
-            trunc_val = "1 minute"
             period = "24h"
 
         if channel and channel != "all":
@@ -745,10 +742,12 @@ async def get_power_chart_data(
             params = [device_id, start_time, end_dt]
             channel_filter_sql = ""
 
-        if trunc_val == "10 minutes":
-            time_bucket_expr = "date_trunc('hour', timestamp) + (EXTRACT(minute FROM timestamp)::int / 10) * interval '10 minutes'"
+        if period == "24h":
+            time_bucket_expr = "date_trunc('hour', timestamp) + INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM timestamp) / 5)"
+        elif period == "7d":
+            time_bucket_expr = "date_trunc('hour', timestamp)"
         else:
-            time_bucket_expr = f"date_trunc('{trunc_val.split()[1]}', timestamp)"
+            time_bucket_expr = "date_trunc('day', timestamp) + INTERVAL '6 hours' * FLOOR(EXTRACT(HOUR FROM timestamp) / 6)"
 
         query = f"""
             SELECT
@@ -783,11 +782,11 @@ async def get_power_chart_data(
             data_by_channel[ch]['current_a'].append(round(float(row['avg_current_a']), 3) if row['avg_current_a'] else 0)
 
         if period == "7d":
-            bucket_delta = timedelta(minutes=10)
-        elif period == "30d":
             bucket_delta = timedelta(hours=1)
+        elif period == "30d":
+            bucket_delta = timedelta(hours=6)
         else:
-            bucket_delta = timedelta(minutes=1)
+            bucket_delta = timedelta(minutes=5)
 
         for ch, cdata in data_by_channel.items():
             if cdata['timestamps']:

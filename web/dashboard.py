@@ -1340,10 +1340,50 @@ def render_dashboard() -> str:
                 return;
             }
 
-            let timeUnit = 'minute';
-            let tooltipFormat = 'dd/MM HH:mm';
-            if (currentChartPeriod === '7d') { timeUnit = 'hour'; tooltipFormat = 'dd/MM HH:mm'; }
-            else if (currentChartPeriod === '30d') { timeUnit = 'day'; tooltipFormat = 'dd/MM/yyyy'; }
+            let xTimeConfig = {};
+            let xTicksConfig = {};
+
+            if (currentChartPeriod === '24h') {
+                xTimeConfig = {
+                    unit: 'hour',
+                    displayFormats: { hour: 'HH:mm' }
+                };
+                xTicksConfig = {
+                    autoSkip: true,
+                    maxTicksLimit: 12,
+                    maxRotation: 0,
+                    callback: function(value, index, ticks) {
+                        const d = new Date(value);
+                        const prevDate = index > 0 ? new Date(ticks[index - 1].value) : null;
+                        const timePart = d.toLocaleTimeString('fr-FR', {timeZone:'UTC', hour:'2-digit', minute:'2-digit'});
+                        if (index === 0 || (prevDate && d.getUTCDate() !== prevDate.getUTCDate())) {
+                            const datePart = d.toLocaleDateString('fr-FR', {timeZone:'UTC', day:'2-digit', month:'2-digit'});
+                            return datePart + ' ' + timePart;
+                        }
+                        return timePart;
+                    }
+                };
+            } else if (currentChartPeriod === '7d') {
+                xTimeConfig = {
+                    unit: 'hour',
+                    displayFormats: { hour: 'dd/MM HH:mm' }
+                };
+                xTicksConfig = {
+                    autoSkip: true,
+                    maxTicksLimit: 14,
+                    maxRotation: 45
+                };
+            } else {
+                xTimeConfig = {
+                    unit: 'day',
+                    displayFormats: { day: 'dd/MM' }
+                };
+                xTicksConfig = {
+                    autoSkip: true,
+                    maxTicksLimit: 15,
+                    maxRotation: 0
+                };
+            }
 
             powerChart = new Chart(canvas, {
                 type: 'line',
@@ -1364,8 +1404,8 @@ def render_dashboard() -> str:
                             callbacks: {
                                 title: function(items) {
                                     if (!items.length) return '';
-                                    const d = items[0].parsed.x;
-                                    return new Date(d).toLocaleString('fr-FR', {timeZone: 'UTC', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+                                    const d = new Date(items[0].parsed.x);
+                                    return d.toLocaleString('fr-FR', {timeZone: 'UTC', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
                                 }
                             }
                         }
@@ -1373,18 +1413,9 @@ def render_dashboard() -> str:
                     scales: {
                         x: {
                             type: 'time',
-                            time: { unit: timeUnit, tooltipFormat: tooltipFormat },
+                            time: xTimeConfig,
                             grid: { display: false },
-                            ticks: {
-                                maxRotation: 45,
-                                autoSkip: true,
-                                maxTicksLimit: 20,
-                                callback: function(value) {
-                                    const d = new Date(value);
-                                    if (currentChartPeriod === '30d') return d.toLocaleDateString('fr-FR', {timeZone:'UTC', day:'2-digit', month:'2-digit'});
-                                    return d.toLocaleString('fr-FR', {timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
-                                }
-                            }
+                            ticks: xTicksConfig
                         },
                         y: {
                             type: 'linear',
