@@ -1,0 +1,204 @@
+EATURE : Fallback automatique de période si pas de données
+
+OBJECTIF : Éviter d'afficher un graphique vide au premier chargement.
+
+COMPORTEMENT :
+1. Chargement initial → tenter période 24h
+2. Si aucune donnée → fallback automatique à 7 jours + message d'info
+3. Si toujours aucune donnée → afficher message "Aucune donnée sur 7 jours" + bouton manuel "Essayer 30 jours"
+
+═══════════════════════════════════════════════════════════════
+
+IMPLÉMENTATION
+
+FRONTEND : Modifier loadChartData()
+
+```javascript
+async function loadChartData(periodOverride = null) {
+    const deviceSelect = document.getElementById('deviceFilter');
+    const channelSelect = document.getElementById('channelFilter');
+    const endDateInput = document.getElementById('chartEndDate');
+    
+    const selectedDevice = deviceSelect?.value;
+    const selectedChannel = channelSelect?.value;
+    const endDate = endDateInput?.value;
+    
+    // Masquer si pas de device
+    const chartSection = document.getElementById('chart-section');
+    if (!selectedDevice || selectedDevice === 'all') {
+        chartSection.style.display = 'none';
+        return;
+    }
+    
+    chartSection.style.display = 'block';
+    
+    // Utiliser période forcée ou période actuelle
+    const period = periodOverride || currentPeriod;
+    
+    // Construire URL API
+    let url = `/api/power-chart-data?device_id=${encodeURIComponent(selectedDevice)}&period=${period}`;
+    
+    if (selectedChannel && selectedChannel !== 'all') {
+        url += `&channel=${encodeURIComponent(selectedChannel)}`;
+    }
+    
+    const today = new Date().toISOString().split('T')[0];
+    if (endDate && endDate !== today) {
+        url += `&end_date=${endDate}`;
+    }
+    
+    try {
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        // VÉRIFIER SI DONNÉES VIDES
+        const hasData = Object.values(result.data || {}).some(channelData => 
+            channelData.timestamps && channelData.timestamps.length > 0
+        );
+        
+        if (!hasData && !periodOverride) {
+            // PAS DE DONNÉES sur la période par défaut
+            
+            if (currentPeriod === '24h') {
+                // Fallback automatique vers 7 jours
+                console.log('⚠️ Aucune donnée sur 24h, fallback vers 7 jours');
+                showInfoMessage('ℹ️ Aucune donnée sur les dernières 24h. Affichage étendu à 7 jours.');
+                
+                // Changer visuellement le bouton actif
+                document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelector('[data-period="7d"]').classList.add('active');
+                currentPeriod = '7d';
+                
+                // Recharger avec 7 jours
+                return await loadChartData('7d');
+            }
+            
+            if (currentPeriod === '7d' && !periodOverride) {
+                // Pas de fallback automatique vers 30j, proposer manuellement
+                console.log('⚠️ Aucune donnée sur 7 jours');
+                showInfoMessage('ℹ️ Aucune donnée sur les 7 derniers jours.', true);
+                // Afficher le graphique vide avec message
+            }
+        }
+        
+        // Masquer le message d'info si données présentes
+        hideInfoMessage();
+        
+        // Mettre à jour le graphique
+        updateChartTitle();
+        updateChart(result.data);
+        
+    } catch (e) {
+        console.error('❌ Erreur chargement graphique:', e);
+        showInfoMessage('❌ Erreur de chargement des données', false);
+    }
+}
+AJOUTER fonctions pour messages d'info :
+function showInfoMessage(message, showTry30Button = false) {
+    let infoDiv = document.getElementById('chart-info-message');
+    
+    if (!infoDiv) {
+        infoDiv = document.createElement('div');
+        infoDiv.id = 'chart-info-message';
+        infoDiv.className = 'chart-info-banner';
+        
+        // Insérer avant le canvas du graphique
+        const chartContainer = document.querySelector('.chart-container');
+        chartContainer.parentElement.insertBefore(infoDiv, chartContainer);
+    }
+    
+    infoDiv.innerHTML = `
+        <span>${message}</span>
+        ${showTry30Button ? '<button onclick="tryPeriod30Days()" class="btn-try-30">Essayer 30 jours</button>' : ''}
+    `;
+    infoDiv.style.display = 'block';
+}
+
+function hideInfoMessage() {
+    const infoDiv = document.getElementById('chart-info-message');
+    if (infoDiv) {
+        infoDiv.style.display = 'none';
+    }
+}
+
+async function tryPeriod30Days() {
+    document.querySelectorAll('.period-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('[data-period="30d"]').classList.add('active');
+    currentPeriod = '30d';
+    await loadChartData();
+}
+CSS pour le bandeau d'info :
+.chart-info-banner {
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.9em;
+    color: #004085;
+}
+
+.chart-info-banner span {
+    flex: 1;
+}
+
+.btn-try-30 {
+    padding: 6px 12px;
+    background: #2d5a3d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    margin-left: 15px;
+}
+
+.btn-try-30:hover {
+    background: #234a30;
+}
+═══════════════════════════════════════════════════════════════
+COMPORTEMENTS ATTENDUS
+CHARGEMENT AVEC DONNÉES SUR 24H :
+Vue 24h chargée
+Graphique affiché
+Pas de message
+CHARGEMENT SANS DONNÉES SUR 24H, AVEC DONNÉES SUR 7J :
+Tentative 24h → vide
+Fallback automatique vers 7j
+Message : "ℹ️ Aucune donnée sur les dernières 24h. Affichage étendu à 7 jours."
+Bouton "7 jours" devient actif visuellement
+Graphique 7j affiché
+CHARGEMENT SANS DONNÉES SUR 24H NI 7J :
+Tentative 24h → vide → fallback 7j → vide
+Message : "ℹ️ Aucune donnée sur les 7 derniers jours." + bouton "Essayer 30 jours"
+Graphique vide avec axes
+Clic sur bouton → charge 30j manuellement
+CHANGEMENT MANUEL DE PÉRIODE :
+User clique sur "30 jours" → pas de fallback, charge directement 30j
+Si vide → affiche graphique vide (pas de fallback supplémentaire)
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+Device avec mesures récentes → vue 24h par défaut, graphique affiché
+Device sans mesures depuis 2 jours → fallback automatique 7j + message
+Device sans mesures depuis 10 jours → message + bouton "Essayer 30j"
+Clic manuel sur période → pas de fallback automatique
+Changement de device → réinitialiser période à 24h et retenter fallback
+Implémente et teste ces scénarios.
+
+---
+
+## ✅ MA VALIDATION FINALE
+
+**OUI je valide** cette feature avec l'implémentation proposée car :
+1. ✅ Limitée à 2 tentatives max (pas 3)
+2. ✅ Message d'info clair pour l'utilisateur
+3. ✅ Bouton manuel pour 30j (pas automatique)
+4. ✅ Pas de complexité backend (logique frontend simple)
+5. ✅ Réversible : user peut revenir à 24h manuellement
+
+**CONDITION :** Si tu constates que ça fait trop de requêtes en prod, on passe à l'approche "requête unique backend" qui retourne la date de dernière mesure.
+
+Go pour cette implémentation ! 🚀
