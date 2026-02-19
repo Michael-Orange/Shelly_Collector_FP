@@ -34,6 +34,15 @@ def render_admin() -> str:
         .error { background: #f8d7da; color: #721c24; }
         .loading { text-align: center; padding: 3rem; color: #7f8c8d; }
         .invalid-input { border: 2px solid #dc3545 !important; background-color: #fff5f5 !important; }
+        .login-overlay { display: flex; justify-content: center; align-items: center; min-height: 80vh; }
+        .login-box { background: white; border-radius: 12px; padding: 2.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 400px; width: 100%; text-align: center; border-top: 4px solid #2d8659; }
+        .login-box h2 { color: #2d8659; margin-bottom: 0.5rem; font-size: 1.4rem; }
+        .login-box p { color: #6b7280; margin-bottom: 1.5rem; font-size: 0.9rem; }
+        .login-box input { width: 100%; padding: 0.8rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1rem; margin-bottom: 1rem; }
+        .login-box input:focus { outline: none; border-color: #2d8659; }
+        .login-box .btn-login { width: 100%; background: #2d8659; color: white; padding: 0.8rem; font-size: 1rem; font-weight: 600; border-radius: 8px; }
+        .login-box .btn-login:hover { background: #1a5738; }
+        .login-error { color: #dc3545; font-size: 0.9rem; margin-bottom: 1rem; display: none; }
         .col-headers { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.3rem; font-size: 0.75rem; color: #888; font-weight: 600; text-transform: uppercase; }
         .col-headers .col-label { min-width: 120px; }
         .col-headers .col-name { flex: 1; }
@@ -73,18 +82,32 @@ def render_admin() -> str:
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>FiltrePlante - Configuration</h1>
-        <div class="header-links">
-            <a href="/dashboard">&#8592; Retour au dashboard</a>
-            <a href="/admin/pumps" class="btn-manage-pumps">G&#233;rer les mod&#232;les de pompes</a>
+    <div id="login-screen" class="login-overlay">
+        <div class="login-box">
+            <h2>&#x1F512; Configuration</h2>
+            <p>Entrez le mot de passe pour acc&eacute;der &agrave; la configuration.</p>
+            <div id="login-error" class="login-error">Mot de passe incorrect</div>
+            <input type="password" id="admin-password" placeholder="Mot de passe" autofocus
+                   onkeydown="if(event.key==='Enter') adminLogin();">
+            <button class="btn-login" onclick="adminLogin()">Acc&eacute;der</button>
+            <div style="margin-top:1rem;"><a href="/dashboard" style="color:#6b7280;font-size:0.9rem;">&#8592; Retour au dashboard</a></div>
         </div>
     </div>
 
-    <div class="container">
-        <div id="msg" class="msg"></div>
-        <div id="loading" class="loading">Chargement...</div>
-        <div id="devices"></div>
+    <div id="admin-content" style="display:none;">
+        <div class="header">
+            <h1>FiltrePlante - Configuration</h1>
+            <div class="header-links">
+                <a href="/dashboard">&#8592; Retour au dashboard</a>
+                <a href="/admin/pumps" class="btn-manage-pumps">G&#233;rer les mod&#232;les de pompes</a>
+            </div>
+        </div>
+
+        <div class="container">
+            <div id="msg" class="msg"></div>
+            <div id="loading" class="loading">Chargement...</div>
+            <div id="devices"></div>
+        </div>
     </div>
 
     <script>
@@ -92,20 +115,46 @@ def render_admin() -> str:
         var pumpModels = [];
         var currentVersionConfigs = [];
 
-        Promise.all([
-            fetch('/api/config/devices').then(function(r) { return r.json(); }),
-            fetch('/api/config/pump-models').then(function(r) { return r.json(); }),
-            fetch('/api/config/current').then(function(r) { return r.json(); })
-        ]).then(function(results) {
-            data = results[0].devices;
-            pumpModels = results[1];
-            currentVersionConfigs = results[2].configs || [];
-            document.getElementById('loading').style.display = 'none';
-            render();
-        }).catch(function(e) {
-            document.getElementById('loading').textContent = 'Erreur de chargement';
-            console.error(e);
-        });
+        async function adminLogin() {
+            var pw = document.getElementById('admin-password').value;
+            var errEl = document.getElementById('login-error');
+            try {
+                var res = await fetch('/api/verify-export-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({password: pw})
+                });
+                if (res.ok) {
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('admin-content').style.display = 'block';
+                    loadAdminData();
+                } else {
+                    errEl.style.display = 'block';
+                    document.getElementById('admin-password').value = '';
+                    document.getElementById('admin-password').focus();
+                }
+            } catch(e) {
+                errEl.textContent = 'Erreur r\u00e9seau';
+                errEl.style.display = 'block';
+            }
+        }
+
+        function loadAdminData() {
+            Promise.all([
+                fetch('/api/config/devices').then(function(r) { return r.json(); }),
+                fetch('/api/config/pump-models').then(function(r) { return r.json(); }),
+                fetch('/api/config/current').then(function(r) { return r.json(); })
+            ]).then(function(results) {
+                data = results[0].devices;
+                pumpModels = results[1];
+                currentVersionConfigs = results[2].configs || [];
+                document.getElementById('loading').style.display = 'none';
+                render();
+            }).catch(function(e) {
+                document.getElementById('loading').textContent = 'Erreur de chargement';
+                console.error(e);
+            });
+        }
 
         function escapeHtml(str) {
             if (!str) return '';
