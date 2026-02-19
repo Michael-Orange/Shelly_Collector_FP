@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, Request, Header
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional, List
 from pydantic import BaseModel, validator
 import os
@@ -17,6 +17,14 @@ from services.config_service import (
     update_pump_model,
     delete_pump_model,
     upsert_device_with_channels
+)
+from services.config_versions_service import (
+    get_all_current_configs,
+    get_config_history,
+    add_config_version,
+    update_current_config,
+    bulk_load_configs_for_period,
+    find_config_for_date_in_memory
 )
 
 router = APIRouter(prefix="/api")
@@ -113,6 +121,19 @@ async def get_pump_cycles(
 
         configs = await get_configs_map(db_pool)
 
+        configs_cache = {}
+        unique_pairs = set()
+        for cycle in cycles:
+            dev = cycle.get('device_id')
+            ch = cycle.get('channel')
+            if dev and ch:
+                unique_pairs.add((dev, ch))
+        for dev, ch in unique_pairs:
+            period_configs = await bulk_load_configs_for_period(
+                db_pool, dev, ch, start_dt.date(), end_dt.date()
+            )
+            configs_cache[(dev, ch)] = period_configs
+
         stats = {
             "max_current": 0,
             "min_current": float('inf'),
@@ -121,6 +142,7 @@ async def get_pump_cycles(
         }
 
         treated_water_m3 = 0.0
+        co2e_dbo5_weighted = []
 
         for cycle in cycles:
             pw = cycle.get('avg_power_w')
@@ -134,12 +156,19 @@ async def get_pump_cycles(
 
             dev = cycle.get('device_id')
             ch = cycle.get('channel')
-            ch_config = None
-            if dev and ch and dev in configs and ch in configs[dev].get('channels', {}):
-                ch_config = configs[dev]['channels'][ch]
 
-            pump_type = ch_config.get('pump_type', 'relevage') if ch_config else 'relevage'
-            flow_rate = ch_config.get('flow_rate') if ch_config else None
+            cycle_start = cycle.get('start_time')
+            if isinstance(cycle_start, str):
+                cycle_date = datetime.fromisoformat(cycle_start.replace('Z', '+00:00')).date()
+            else:
+                cycle_date = cycle_start.date() if cycle_start else start_dt.date()
+
+            versioned_config = find_config_for_date_in_memory(
+                configs_cache.get((dev, ch), []), cycle_date
+            )
+
+            pump_type = versioned_config['pump_type'] if versioned_config and versioned_config.get('pump_type') else 'relevage'
+            flow_rate = versioned_config['flow_rate'] if versioned_config else None
             cycle['pump_type'] = pump_type
 
             if pump_type == 'relevage' and flow_rate and cycle.get('duration_minutes'):
@@ -147,6 +176,8 @@ async def get_pump_cycles(
                 cycle['volume_m3'] = volume
                 if not cycle.get('is_ongoing'):
                     treated_water_m3 += volume
+                    dbo5_for_cycle = versioned_config.get('dbo5', 570) if versioned_config else 570
+                    co2e_dbo5_weighted.append((volume, dbo5_for_cycle or 570))
             else:
                 cycle['volume_m3'] = None
 
@@ -159,15 +190,20 @@ async def get_pump_cycles(
         num_days = (end_dt - start_dt).days + 1
         treated_water_per_day = round(treated_water_m3 / num_days, 2) if num_days > 0 else 0
 
-        dbo5_val = 570
-        if device_id and device_id in configs:
-            dbo5_val = configs[device_id].get('dbo5_mg_l', 570)
-        elif found_device_ids:
-            for did in found_device_ids:
-                if did in configs:
-                    dbo5_val = configs[did].get('dbo5_mg_l', 570)
-                    break
-        co2e_impact = calculate_co2e_impact(treated_water_m3, dbo5_val)
+        if co2e_dbo5_weighted and treated_water_m3 > 0:
+            total_co2e_avoided = 0.0
+            total_ch4_avoided = 0.0
+            for vol, dbo5_val in co2e_dbo5_weighted:
+                impact = calculate_co2e_impact(vol, dbo5_val)
+                total_co2e_avoided += impact['co2e_avoided_kg']
+                total_ch4_avoided += impact['ch4_avoided_kg']
+            co2e_impact = {
+                "co2e_avoided_kg": round(total_co2e_avoided, 2),
+                "reduction_percent": round(94.0, 1),
+                "ch4_avoided_kg": round(total_ch4_avoided, 2)
+            }
+        else:
+            co2e_impact = calculate_co2e_impact(0, 570)
 
         return {
             "total": len(cycles),
@@ -493,6 +529,137 @@ async def ingest_batch(
         "devices": len(devices),
         "processing_time": round(processing_time, 2)
     }
+
+
+@router.get("/config/current")
+async def get_all_current_configs_route(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        configs = await get_all_current_configs(db_pool)
+        for c in configs:
+            if c.get('effective_from'):
+                c['effective_from'] = c['effective_from'].isoformat()
+        return {"configs": configs}
+    except Exception as e:
+        print(f"❌ Error fetching current configs: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/config/current")
+async def update_current_config_route(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        if not device_id or not channel:
+            raise HTTPException(400, "device_id et channel requis")
+
+        flow_rate_val = body.get("flow_rate")
+        if flow_rate_val is not None:
+            flow_rate_val = float(flow_rate_val)
+        pump_model_val = body.get("pump_model_id")
+        if pump_model_val is not None:
+            pump_model_val = int(pump_model_val)
+        dbo5_val = body.get("dbo5")
+        if dbo5_val is not None:
+            dbo5_val = int(dbo5_val)
+        dco_val = body.get("dco")
+        if dco_val is not None:
+            dco_val = int(dco_val)
+        mes_val = body.get("mes")
+        if mes_val is not None:
+            mes_val = int(mes_val)
+
+        await update_current_config(
+            db_pool, device_id, channel,
+            channel_name=body.get("channel_name"),
+            pump_model_id=pump_model_val,
+            flow_rate=flow_rate_val,
+            pump_type=body.get("pump_type"),
+            dbo5=dbo5_val,
+            dco=dco_val,
+            mes=mes_val
+        )
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error updating current config: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/config/history")
+async def get_config_history_route(
+    request: Request,
+    device_id: str = Query(...),
+    channel: str = Query(...)
+):
+    db_pool = request.app.state.db_pool
+    try:
+        history = await get_config_history(db_pool, device_id, channel)
+        for h in history:
+            if h.get('effective_from'):
+                h['effective_from'] = h['effective_from'].isoformat()
+            if h.get('effective_to'):
+                h['effective_to'] = h['effective_to'].isoformat()
+            if h.get('created_at'):
+                h['created_at'] = h['created_at'].isoformat()
+        return {"history": history}
+    except Exception as e:
+        print(f"❌ Error fetching config history: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/version")
+async def add_config_version_route(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        effective_from_str = body.get("effective_from")
+        if not all([device_id, channel, effective_from_str]):
+            raise HTTPException(400, "device_id, channel et effective_from requis")
+
+        effective_from = datetime.strptime(effective_from_str, '%Y-%m-%d').date()
+
+        flow_rate_val = body.get("flow_rate")
+        if flow_rate_val is not None:
+            flow_rate_val = float(flow_rate_val)
+        pump_model_val = body.get("pump_model_id")
+        if pump_model_val is not None:
+            pump_model_val = int(pump_model_val)
+        dbo5_val = body.get("dbo5")
+        if dbo5_val is not None:
+            dbo5_val = int(dbo5_val)
+        dco_val = body.get("dco")
+        if dco_val is not None:
+            dco_val = int(dco_val)
+        mes_val = body.get("mes")
+        if mes_val is not None:
+            mes_val = int(mes_val)
+
+        await add_config_version(
+            db_pool, device_id, channel, effective_from,
+            channel_name=body.get("channel_name"),
+            pump_model_id=pump_model_val,
+            flow_rate=flow_rate_val,
+            pump_type=body.get("pump_type"),
+            dbo5=dbo5_val,
+            dco=dco_val,
+            mes=mes_val
+        )
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error adding config version: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/queue")

@@ -22,8 +22,8 @@ def render_admin() -> str:
         .device-id { font-family: monospace; color: #7f8c8d; margin-bottom: 1rem; font-size: 0.9rem; }
         .input-row { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
         .input-row label { min-width: 120px; font-weight: 600; color: #1a5738; font-size: 0.95rem; }
-        .input-row input { flex: 1; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; }
-        .input-row select { flex: 2; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; background: white; }
+        .input-row input, .input-row select { flex: 1; padding: 0.6rem; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 0.95rem; }
+        .input-row select { background: white; }
         .input-row input:focus, .input-row select:focus { outline: none; border-color: #2d8659; }
         button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s; }
         .btn-save { background: #2d8659; color: white; font-size: 0.9rem; margin-top: 1rem; }
@@ -40,12 +40,35 @@ def render_admin() -> str:
         .col-headers .col-model { flex: 2; }
         .col-headers .col-type { width: 150px; }
         .col-headers .col-flow { width: 120px; text-align: center; }
+
+        .btn-history { background: #6c757d; color: white; padding: 6px 14px; border-radius: 6px; font-size: 0.85rem; margin-top: 8px; margin-right: 8px; }
+        .btn-history:hover { background: #5a6268; }
+        .version-panel { margin-top: 15px; padding: 15px; background: #f0f2f5; border-radius: 8px; border: 1px solid #dee2e6; }
+        .version-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 0.9rem; }
+        .version-table th { background: #e9ecef; padding: 8px 10px; text-align: left; font-weight: 600; color: #495057; }
+        .version-table td { padding: 6px 10px; border-bottom: 1px solid #dee2e6; }
+        .version-table tr:hover { background: #f8f9fa; }
+        .add-version-form { background: white; padding: 15px; border-radius: 8px; border: 2px solid #ffc107; margin-top: 15px; }
+        .add-version-form h4 { margin: 0 0 5px 0; color: #495057; font-size: 1rem; }
+        .add-version-form .warning-note { background: #fff3cd; color: #856404; padding: 8px 12px; border-radius: 4px; font-size: 0.85rem; margin-bottom: 12px; }
+        .add-version-form .info-note { background: #e7f3ff; color: #004085; padding: 8px 12px; border-radius: 4px; font-size: 0.85rem; margin-bottom: 12px; }
+        .version-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+        .version-form-grid label { display: block; font-weight: 500; color: #495057; font-size: 0.85rem; margin-bottom: 3px; }
+        .version-form-grid input, .version-form-grid select { width: 100%; padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.9rem; }
+        .version-form-grid .full-width { grid-column: 1 / -1; }
+        .btn-create-version { background: #e67e22; color: white; padding: 8px 18px; border-radius: 6px; font-size: 0.9rem; font-weight: 500; margin-top: 8px; }
+        .btn-create-version:hover { background: #d35400; }
+        .no-data { color: #6c757d; font-style: italic; padding: 15px; text-align: center; }
+        .section-title { font-size: 0.85rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 5px 0; }
+        .active-badge { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
+        .closed-badge { background: #e2e3e5; color: #6c757d; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
         @media (max-width: 768px) {
             .container { padding: 0 1rem; }
             .input-row { flex-direction: column; align-items: stretch; }
             .input-row label { min-width: unset; }
             .channels { margin-left: 0; }
             .water-quality-grid { grid-template-columns: 1fr !important; }
+            .version-form-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -67,17 +90,21 @@ def render_admin() -> str:
     <script>
         var data = [];
         var pumpModels = [];
+        var currentVersionConfigs = [];
 
         Promise.all([
             fetch('/api/config/devices').then(function(r) { return r.json(); }),
-            fetch('/api/config/pump-models').then(function(r) { return r.json(); })
+            fetch('/api/config/pump-models').then(function(r) { return r.json(); }),
+            fetch('/api/config/current').then(function(r) { return r.json(); })
         ]).then(function(results) {
             data = results[0].devices;
             pumpModels = results[1];
+            currentVersionConfigs = results[2].configs || [];
             document.getElementById('loading').style.display = 'none';
             render();
         }).catch(function(e) {
             document.getElementById('loading').textContent = 'Erreur de chargement';
+            console.error(e);
         });
 
         function escapeHtml(str) {
@@ -92,7 +119,7 @@ def render_admin() -> str:
 
         function buildPumpSelect(selectId, selectedModelId) {
             var html = '<select id="' + selectId + '" style="flex:2;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;background:white;">';
-            html += '<option value="">-- Aucun mod\u00e8le --</option>';
+            html += '<option value="">-- Aucun mod\\u00e8le --</option>';
             pumpModels.forEach(function(pump) {
                 var selected = (selectedModelId && selectedModelId == pump.id) ? ' selected' : '';
                 html += '<option value="' + pump.id + '"' + selected + '>' + escapeHtml(formatPumpOption(pump)) + '</option>';
@@ -101,10 +128,16 @@ def render_admin() -> str:
             return html;
         }
 
+        function getVersionConfig(deviceId, channel) {
+            return currentVersionConfigs.find(function(c) {
+                return c.device_id === deviceId && c.channel === channel;
+            });
+        }
+
         function render() {
             var container = document.getElementById('devices');
             if (data.length === 0) {
-                container.innerHTML = '<p style="text-align:center;color:#7f8c8d;padding:2rem;">Aucun device trouv\u00e9 dans les donn\u00e9es.</p>';
+                container.innerHTML = '<p style="text-align:center;color:#7f8c8d;padding:2rem;">Aucun device trouv\\u00e9 dans les donn\\u00e9es.</p>';
                 return;
             }
             container.innerHTML = data.map(function(device) {
@@ -123,9 +156,9 @@ def render_admin() -> str:
                         '<div class="col-headers">' +
                             '<div class="col-label"></div>' +
                             '<div class="col-name">Nom</div>' +
-                            '<div class="col-model">Mod\u00e8le</div>' +
+                            '<div class="col-model">Mod\\u00e8le</div>' +
                             '<div class="col-type">Type de poste</div>' +
-                            '<div class="col-flow">D\u00e9bit (m3/h)</div>' +
+                            '<div class="col-flow">D\\u00e9bit (m3/h)</div>' +
                         '</div>' +
                         device.channels.map(function(ch) {
                             var safeCh = escapeHtml(ch);
@@ -146,13 +179,17 @@ def render_admin() -> str:
                                     '<option value="sortie"' + (pumpType === 'sortie' ? ' selected' : '') + '>Sortie</option>' +
                                     '<option value="autre"' + (pumpType === 'autre' ? ' selected' : '') + '>Autre</option>' +
                                 '</select>' +
-                                '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="D\u00e9bit" title="D\u00e9bit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
+                                '<input type="number" id="fr-' + safeId + '-' + safeCh + '" value="' + flowRate + '" step="0.1" min="0" placeholder="D\\u00e9bit" title="D\\u00e9bit effectif (m3/h)" style="width:120px;padding:0.6rem;border:2px solid #e0e0e0;border-radius:8px;font-size:0.95rem;">' +
+                            '</div>' +
+                            '<div style="margin-left:120px;margin-bottom:15px;">' +
+                                '<button class="btn-history" onclick="toggleVersionHistory(\\'' + safeId + '\\', \\'' + safeCh + '\\')">&#x1F4DC; Historique des versions</button>' +
+                                '<div id="vh-' + safeId + '-' + safeCh + '" style="display:none;"></div>' +
                             '</div>';
                         }).join('') +
                     '</div>' +
                     '<div style="border-top: 2px solid #e5e7eb; margin: 30px 0 20px 0; padding-top: 20px;">' +
-                        '<h3 style="font-size: 1.05rem; font-weight: 600; color: #2d8659; margin-bottom: 6px;">&#x1F4A7; Qualit\u00e9 des eaux brutes</h3>' +
-                        '<p style="font-size: 0.85rem; color: #6b7280; margin-bottom: 15px;">Valeurs moyennes estim\u00e9es des eaux du site</p>' +
+                        '<h3 style="font-size: 1.05rem; font-weight: 600; color: #2d8659; margin-bottom: 6px;">&#x1F4A7; Qualit\\u00e9 des eaux brutes</h3>' +
+                        '<p style="font-size: 0.85rem; color: #6b7280; margin-bottom: 15px;">Valeurs moyennes estim\\u00e9es des eaux du site</p>' +
                     '</div>' +
                     '<div class="water-quality-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2d8659; margin-bottom: 1rem;">' +
                         '<div>' +
@@ -191,7 +228,7 @@ def render_admin() -> str:
                 if (flowVal !== '' && (isNaN(parseFloat(flowVal)) || parseFloat(flowVal) < 0)) {
                     flowInput.classList.add('invalid-input');
                     flowInput.focus();
-                    showMsg('error', 'D\u00e9bit effectif invalide pour ' + (nameInput ? nameInput.value || ch : ch));
+                    showMsg('error', 'D\\u00e9bit effectif invalide pour ' + (nameInput ? nameInput.value || ch : ch));
                     return;
                 }
                 if (flowInput) flowInput.classList.remove('invalid-input');
@@ -226,13 +263,184 @@ def render_admin() -> str:
                     })
                 });
                 if (res.ok) {
-                    showMsg('success', 'Configuration enregistree !');
+                    showMsg('success', 'Configuration enregistr\\u00e9e !');
                 } else {
                     var errData = await res.json().catch(function() { return {}; });
                     showMsg('error', errData.detail || 'Erreur');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur r\u00e9seau');
+                showMsg('error', 'Erreur r\\u00e9seau');
+            }
+        }
+
+        async function toggleVersionHistory(deviceId, channel) {
+            var panel = document.getElementById('vh-' + deviceId + '-' + channel);
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                panel.innerHTML = '<p style="color:#7f8c8d;padding:10px;">Chargement...</p>';
+                await loadVersionHistory(deviceId, channel);
+            } else {
+                panel.style.display = 'none';
+            }
+        }
+
+        async function loadVersionHistory(deviceId, channel) {
+            var panel = document.getElementById('vh-' + deviceId + '-' + channel);
+            try {
+                var response = await fetch('/api/config/history?device_id=' + encodeURIComponent(deviceId) + '&channel=' + encodeURIComponent(channel));
+                var result = await response.json();
+                var history = result.history || [];
+
+                var html = '<div class="version-panel">';
+
+                if (history.length === 0) {
+                    html += '<p class="no-data">Aucune version historique</p>';
+                } else {
+                    html += '<table class="version-table">';
+                    html += '<thead><tr><th>P\\u00e9riode</th><th>D\\u00e9bit</th><th>Type</th><th>DBO5/DCO/MES</th><th>V.</th><th>Statut</th></tr></thead>';
+                    html += '<tbody>';
+                    history.forEach(function(v) {
+                        var fromDate = v.effective_from ? new Date(v.effective_from + 'T00:00:00').toLocaleDateString('fr-FR') : '?';
+                        var toDate = v.effective_to ? new Date(v.effective_to + 'T00:00:00').toLocaleDateString('fr-FR') : '';
+                        var period = fromDate + ' \\u2192 ' + (toDate || 'Actuel');
+                        var flow = v.flow_rate ? v.flow_rate + ' m\\u00b3/h' : '-';
+                        var ptype = v.pump_type || '-';
+                        var water = (v.dbo5 || '-') + ' / ' + (v.dco || '-') + ' / ' + (v.mes || '-');
+                        var badge = v.effective_to ? '<span class="closed-badge">Cl\\u00f4tur\\u00e9</span>' : '<span class="active-badge">Actif</span>';
+
+                        html += '<tr>' +
+                            '<td><strong>' + period + '</strong></td>' +
+                            '<td>' + flow + '</td>' +
+                            '<td>' + ptype + '</td>' +
+                            '<td>' + water + '</td>' +
+                            '<td>v' + v.version + '</td>' +
+                            '<td>' + badge + '</td>' +
+                        '</tr>';
+                    });
+                    html += '</tbody></table>';
+                }
+
+                var vc = getVersionConfig(deviceId, channel);
+                var prefillFlow = (vc && vc.flow_rate != null) ? vc.flow_rate : '';
+                var prefillType = (vc && vc.pump_type) ? vc.pump_type : 'relevage';
+                var prefillDbo5 = (vc && vc.dbo5 != null) ? vc.dbo5 : '';
+                var prefillDco = (vc && vc.dco != null) ? vc.dco : '';
+                var prefillMes = (vc && vc.mes != null) ? vc.mes : '';
+
+                html += '<div class="add-version-form">' +
+                    '<h4>Cr\\u00e9er une nouvelle version historique</h4>' +
+                    '<div class="warning-note">&#x26A0;&#xFE0F; Ceci cr\\u00e9e un changement de configuration \\u00e0 partir d\\u0027une date donn\\u00e9e. La version pr\\u00e9c\\u00e9dente sera cl\\u00f4tur\\u00e9e.</div>' +
+                    '<div class="info-note">&#x1F4A1; Formulaire pr\\u00e9-rempli avec les valeurs actuelles. Modifiez seulement ce qui change.</div>' +
+
+                    '<div class="version-form-grid">' +
+                        '<div class="full-width">' +
+                            '<label>Date d\\u0027effet *</label>' +
+                            '<input type="date" id="nv-date-' + deviceId + '-' + channel + '" required>' +
+                        '</div>' +
+
+                        '<div>' +
+                            '<label>D\\u00e9bit (m\\u00b3/h)</label>' +
+                            '<input type="number" id="nv-flow-' + deviceId + '-' + channel + '" step="0.1" min="0.1" value="' + prefillFlow + '">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label>Type de poste</label>' +
+                            '<select id="nv-type-' + deviceId + '-' + channel + '">' +
+                                '<option value="relevage"' + (prefillType === 'relevage' ? ' selected' : '') + '>Relevage</option>' +
+                                '<option value="sortie"' + (prefillType === 'sortie' ? ' selected' : '') + '>Sortie</option>' +
+                                '<option value="autre"' + (prefillType === 'autre' ? ' selected' : '') + '>Autre</option>' +
+                            '</select>' +
+                        '</div>' +
+
+                        '<div class="full-width"><p class="section-title">Qualit\\u00e9 des eaux brutes</p></div>' +
+                        '<div>' +
+                            '<label>DBO5 (mg/L)</label>' +
+                            '<input type="number" id="nv-dbo5-' + deviceId + '-' + channel + '" value="' + prefillDbo5 + '">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label>DCO (mg/L)</label>' +
+                            '<input type="number" id="nv-dco-' + deviceId + '-' + channel + '" value="' + prefillDco + '">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label>MES (mg/L)</label>' +
+                            '<input type="number" id="nv-mes-' + deviceId + '-' + channel + '" value="' + prefillMes + '">' +
+                        '</div>' +
+                    '</div>' +
+                    '<button class="btn-create-version" onclick="addConfigVersion(\\'' + deviceId + '\\', \\'' + channel + '\\')">&#x2795; Cr\\u00e9er cette version</button>' +
+                '</div>';
+
+                html += '</div>';
+                panel.innerHTML = html;
+            } catch(e) {
+                panel.innerHTML = '<p style="color:#dc3545;padding:10px;">Erreur de chargement</p>';
+                console.error(e);
+            }
+        }
+
+        function parseFloatOrNull(val) {
+            var parsed = parseFloat(val);
+            return isNaN(parsed) ? null : parsed;
+        }
+
+        function parseIntOrNull(val) {
+            var parsed = parseInt(val);
+            return isNaN(parsed) ? null : parsed;
+        }
+
+        async function addConfigVersion(deviceId, channel) {
+            var dateInput = document.getElementById('nv-date-' + deviceId + '-' + channel);
+            var effectiveDate = dateInput ? dateInput.value : '';
+
+            if (!effectiveDate) {
+                showMsg('error', 'Date d\\u0027effet requise');
+                return;
+            }
+
+            var flowRate = parseFloatOrNull(document.getElementById('nv-flow-' + deviceId + '-' + channel).value);
+            var pumpType = document.getElementById('nv-type-' + deviceId + '-' + channel).value || null;
+            var dbo5 = parseIntOrNull(document.getElementById('nv-dbo5-' + deviceId + '-' + channel).value);
+            var dco = parseIntOrNull(document.getElementById('nv-dco-' + deviceId + '-' + channel).value);
+            var mes = parseIntOrNull(document.getElementById('nv-mes-' + deviceId + '-' + channel).value);
+
+            var payload = {
+                device_id: deviceId,
+                channel: channel,
+                effective_from: effectiveDate,
+                flow_rate: flowRate,
+                pump_type: pumpType,
+                dbo5: dbo5,
+                dco: dco,
+                mes: mes
+            };
+
+            try {
+                var res = await fetch('/api/config/version', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) {
+                    var errData = await res.json().catch(function() { return {}; });
+                    showMsg('error', errData.detail || 'Erreur');
+                    return;
+                }
+
+                showMsg('success', 'Nouvelle version cr\\u00e9\\u00e9e avec succ\\u00e8s');
+
+                var updatedRes = await fetch('/api/config/current');
+                var updatedData = await updatedRes.json();
+                currentVersionConfigs = updatedData.configs || [];
+
+                var flowInput = document.getElementById('fr-' + deviceId + '-' + channel);
+                var typeSelect = document.getElementById('pt-' + deviceId + '-' + channel);
+                var vc = getVersionConfig(deviceId, channel);
+                if (vc && flowInput) flowInput.value = vc.flow_rate || '';
+                if (vc && typeSelect) typeSelect.value = vc.pump_type || 'relevage';
+
+                await loadVersionHistory(deviceId, channel);
+            } catch(e) {
+                showMsg('error', 'Erreur r\\u00e9seau');
+                console.error(e);
             }
         }
 
@@ -367,10 +575,15 @@ def render_pumps_admin() -> str:
             }
         }
 
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
         function renderTable() {
             var tbody = document.getElementById('pumps-tbody');
             if (pumps.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun mod\u00e8le de pompe</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucun mod\\u00e8le de pompe</td></tr>';
                 return;
             }
             tbody.innerHTML = pumps.map(function(pump) {
@@ -415,14 +628,14 @@ def render_pumps_admin() -> str:
                 });
                 var data = await res.json();
                 if (res.ok && data.success) {
-                    showMsg('success', pumpId ? 'Mod\u00e8le modifi\u00e9 !' : 'Mod\u00e8le cr\u00e9\u00e9 !');
+                    showMsg('success', pumpId ? 'Mod\\u00e8le modifi\\u00e9 !' : 'Mod\\u00e8le cr\\u00e9\\u00e9 !');
                     resetForm();
                     loadPumps();
                 } else {
                     showMsg('error', data.error || 'Erreur');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur r\u00e9seau');
+                showMsg('error', 'Erreur r\\u00e9seau');
             }
         }
 
@@ -439,21 +652,18 @@ def render_pumps_admin() -> str:
         }
 
         async function deletePump(id) {
-            var pump = pumps.find(function(p) { return p.id === id; });
-            if (!pump) return;
-            if (!confirm('Supprimer le mod\u00e8le "' + pump.name + '" ?')) return;
-
+            if (!confirm('Supprimer ce mod\\u00e8le ?')) return;
             try {
                 var res = await fetch('/api/config/pump-model/' + id, { method: 'DELETE' });
                 var data = await res.json();
-                if (data.success) {
-                    showMsg('success', 'Mod\u00e8le supprim\u00e9 !');
+                if (res.ok && data.success) {
+                    showMsg('success', 'Mod\\u00e8le supprim\\u00e9 !');
                     loadPumps();
                 } else {
-                    showMsg('error', data.error || 'Erreur de suppression');
+                    showMsg('error', data.detail || data.error || 'Erreur');
                 }
             } catch(e) {
-                showMsg('error', 'Erreur r\u00e9seau');
+                showMsg('error', 'Erreur r\\u00e9seau');
             }
         }
 
@@ -463,12 +673,7 @@ def render_pumps_admin() -> str:
             document.getElementById('pump-power').value = '';
             document.getElementById('pump-current').value = '';
             document.getElementById('pump-flow').value = '';
-            document.getElementById('form-title').textContent = 'Ajouter un nouveau mod\u00e8le';
-        }
-
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            document.getElementById('form-title').textContent = 'Ajouter un nouveau mod\\u00e8le';
         }
 
         function showMsg(type, text) {

@@ -4,7 +4,22 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-15 (Latest)**: Architecture migration — WebSocket → HTTP batch ingestion :
+**2026-02-19 (Latest)**: Configuration versioning — SCD Type 2 :
+- **New**: Table `device_config_versions` with `effective_from`/`effective_to` for temporal config tracking
+- **New**: Service `services/config_versions_service.py` with full version management
+- **New**: API `POST /api/config/version` — create new config version with effective date
+- **New**: API `GET /api/config/current` — list all active configs from versions table
+- **New**: API `PUT /api/config/current` — update current config in place (no versioning)
+- **New**: API `GET /api/config/history` — list all config versions for a device/channel
+- **New**: `bulk_load_configs_for_period()` + `find_config_for_date_in_memory()` for batch optimization
+- **Modified**: `/api/pump-cycles` uses versioned configs per cycle (flow_rate + DBO5/DCO/MES historical)
+- **Modified**: CO2e calculation uses per-cycle DBO5 from versioned config
+- **Modified**: Admin interface — "Historique des versions" collapsible panel per channel
+- **Modified**: New version form pre-filled with current values, targeted refresh (no page reload)
+- **Migration**: Existing `device_config` data auto-migrated to `device_config_versions` on startup
+- **Feature**: Fusion logic — changing one field copies others from previous version
+
+**2026-02-15**: Architecture migration — WebSocket → HTTP batch ingestion :
 - **BREAKING**: Removed WebSocket endpoint `/ws` entirely (no more WS connection)
 - **New**: `POST /api/ingest/batch` — Secure HTTP batch endpoint for Cloudflare Queue consumer
 - **New**: `GET /api/stats/queue` — Stats endpoint for monitoring (last 24h insertions)
@@ -52,9 +67,10 @@ shelly_collector_fp/
 ├── config.py                  # Centralized configuration (DB, dashboard, device ID)
 ├── services/
 │   ├── __init__.py
-│   ├── database.py            # DB pool (create/close), create_tables()
+│   ├── database.py            # DB pool (create/close), create_tables(), migration
 │   ├── cycle_detector.py      # detect_cycles() - gap-based ON/OFF cycle detection
-│   └── config_service.py      # CRUD for device/channel names + pump models (device_config, pump_models)
+│   ├── config_service.py      # CRUD for device/channel names + pump models (device_config, pump_models)
+│   └── config_versions_service.py  # SCD Type 2 config versioning (device_config_versions)
 ├── api/
 │   ├── __init__.py
 │   └── routes.py              # /api/ingest/batch + /api/pump-cycles + /api/config/* + /api/stats/queue
@@ -85,6 +101,10 @@ shelly_collector_fp/
 | `/api/config/device` | POST | Update device + channels config (transaction) |
 | `/api/config/channel` | POST | Update channel name |
 | `/api/config/device/{id}` | DELETE | Delete device config |
+| `/api/config/current` | GET | List all active configs (from device_config_versions) |
+| `/api/config/current` | PUT | Update current config in place (no versioning) |
+| `/api/config/version` | POST | Create new config version with effective date |
+| `/api/config/history` | GET | List all config versions for device/channel |
 | `/api/config/pump-models` | GET | List all pump models |
 | `/api/config/pump-model` | POST | Create pump model |
 | `/api/config/pump-model/{id}` | PUT | Update pump model |
@@ -176,10 +196,28 @@ CREATE TABLE pump_models (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- device_config also has: pump_model_id INTEGER REFERENCES pump_models(id)
--- device_config also has: flow_rate REAL NULL
--- device_config also has: pump_type TEXT NOT NULL DEFAULT 'relevage' (relevage/sortie/autre)
--- device_config also has: dbo5_mg_l, dco_mg_l, mes_mg_l INTEGER
+-- device_config kept for backward compatibility (synced by config_versions_service)
+
+CREATE TABLE device_config_versions (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    channel_name VARCHAR(100),
+    pump_model_id INTEGER REFERENCES pump_models(id) ON DELETE SET NULL,
+    flow_rate REAL,
+    pump_type VARCHAR(50),
+    dbo5 INTEGER,
+    dco INTEGER,
+    mes INTEGER,
+    effective_from DATE NOT NULL,
+    effective_to DATE,  -- NULL = currently active version
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+-- SCD Type 2: effective_from/effective_to for temporal tracking
+-- Fusion: changing one field copies others from previous version
+-- Multiple versions per device/channel, only one active (effective_to IS NULL)
 ```
 
 ## Environment Variables / Secrets
