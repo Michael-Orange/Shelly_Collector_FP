@@ -1,0 +1,104 @@
+PROBLÈME IDENTIFIÉ : Incohérence entre date picker et titre du graphique
+
+OBSERVATIONS :
+- Date picker : 17/11/2025
+- Titre graphique : 18/02/2026 — 19/02/2026 (INCORRECT)
+- Données dans le tableau : 17/11/2025 et avant
+
+→ Le graphique essaie d'afficher 18/02-19/02 alors que le date picker demande 17/11/2025
+
+ROOT CAUSE : Le titre n'est PAS mis à jour selon la vraie période utilisée
+
+═══════════════════════════════════════════════════════════════
+
+SOLUTION 1 : Mettre à jour le titre APRÈS chaque chargement de données
+
+Dans loadChartData(), APRÈS avoir reçu les données de l'API :
+
+```javascript
+async function loadChartData() {
+    // ... fetch API ...
+    
+    const result = await response.json();
+    
+    // METTRE À JOUR LE TITRE avec les vraies bornes
+    updateChartTitle();
+    
+    updateChart(result.data);
+}
+Fonction updateChartTitle() à corriger :
+function updateChartTitle() {
+    const endDateInput = document.getElementById('chartEndDate');
+    const endDate = endDateInput?.value;  // Format YYYY-MM-DD
+    
+    if (!endDate) return;
+    
+    // Calculer end_datetime
+    const today = new Date().toISOString().split('T')[0];
+    let endDateTime;
+    
+    if (endDate === today) {
+        // Aujourd'hui → NOW
+        endDateTime = new Date();
+    } else {
+        // Date passée → 23:59 de ce jour
+        endDateTime = new Date(endDate + 'T23:59:59');
+    }
+    
+    // Calculer start_datetime selon période
+    let startDateTime = new Date(endDateTime);
+    if (currentPeriod === '24h') {
+        startDateTime.setHours(startDateTime.getHours() - 24);
+    } else if (currentPeriod === '7d') {
+        startDateTime.setDate(startDateTime.getDate() - 7);
+    } else { // 30d
+        startDateTime.setDate(startDateTime.getDate() - 30);
+    }
+    
+    // Formatter les dates
+    const formatDate = (d) => d.toLocaleDateString('fr-FR', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric' 
+    });
+    
+    // Mettre à jour le titre
+    const titleElement = document.querySelector('#chart-section h3') || document.querySelector('.chart-header h3');
+    if (titleElement) {
+        titleElement.textContent = `📊 Activité électrique`;
+    }
+    
+    // Mettre à jour le sous-titre avec la période
+    const subtitleElement = document.querySelector('.date-range');
+    if (subtitleElement) {
+        subtitleElement.textContent = `${formatDate(startDateTime)} — ${formatDate(endDateTime)}`;
+    }
+}
+HTML à vérifier/ajouter dans la structure :
+<div class="chart-header">
+    <h3>📊 Activité électrique</h3>
+    <p class="date-range">18/02/2026 — 19/02/2026</p>
+</div>
+═══════════════════════════════════════════════════════════════
+SOLUTION 2 : Vérifier que le date picker envoie bien la bonne date
+Ajoute un log dans loadChartData() pour confirmer :
+const endDate = endDateInput?.value;
+console.log('🔍 Date picker value:', endDate);
+console.log('🔍 Today:', new Date().toISOString().split('T')[0]);
+console.log('🔍 Will send end_date to API:', endDate !== today ? endDate : 'NONE (will use NOW)');
+ATTENDU avec date picker à 17/11/2025 :
+Date picker value: 2025-11-17
+Today: 2026-02-19
+Will send end_date: 2025-11-17
+Titre devrait afficher: 16/11/2025 — 17/11/2025
+═══════════════════════════════════════════════════════════════
+RÉSUMÉ :
+Le problème est que le titre affiche "18/02 — 19/02" (basé sur NOW) alors que :
+Le date picker est à 17/11/2025
+end_date devrait être envoyé à l'API = 2025-11-17
+La période devrait être 16/11 - 17/11
+Implémente updateChartTitle() correctement et appelle-la après chaque chargement.
+Donne-moi ensuite :
+Le log "Will send end_date to API"
+Le titre affiché
+Si le graphique affiche maintenant les données du 17/11

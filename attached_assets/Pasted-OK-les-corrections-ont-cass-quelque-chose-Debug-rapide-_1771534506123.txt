@@ -1,0 +1,61 @@
+OK, les corrections ont cassé quelque chose. Debug rapide :
+
+ÉTAPE 1 : Vérifier les logs console navigateur (F12)
+
+Regarde :
+1. L'URL de la requête /api/power-chart-data - elle est bien formée ?
+2. La réponse de l'API - contient-elle des données ?
+3. Y a-t-il des erreurs JavaScript ?
+4. Les bornes min/max calculées - sont-elles cohérentes ?
+
+ÉTAPE 2 : Vérifier les logs serveur
+
+Regarde les logs DEBUG ajoutés :
+- end_date reçu = ?
+- end_datetime = ?
+- start_time = ?
+- Nombre de rows retournées par la requête SQL ?
+
+ÉTAPE 3 : Causes probables
+
+**Cause A : Pas de données dans la période**
+- Si start_time est dans le futur ou très loin dans le passé → 0 résultats
+- Vérifier que start_time < end_datetime
+
+**Cause B : Fonction getChartTimeBounds() bugguée**
+- min > max → axe X inversé
+- Dates mal calculées
+
+**Cause C : Format des données mal parsé**
+- Les timestamps des datasets ne correspondent pas aux bornes
+- Chart.js ne trouve rien à afficher
+
+ACTION IMMÉDIATE :
+
+Ajoute un console.log dans updateChart() AVANT de créer les datasets :
+
+```javascript
+async function loadChartData() {
+    // ... fetch API ...
+    
+    const result = await response.json();
+    
+    console.log('🔍 API Response:', result);
+    console.log('🔍 Data by channel:', result.data);
+    console.log('🔍 Chart bounds:', getChartTimeBounds());
+    
+    updateChart(result.data);
+}
+Et dans updateChart() :
+function updateChart(dataByChannel) {
+    console.log('🔍 Updating chart with data:', dataByChannel);
+    console.log('🔍 Number of channels:', Object.keys(dataByChannel).length);
+    
+    for (const [channel, data] of Object.entries(dataByChannel)) {
+        console.log(`🔍 Channel ${channel}: ${data.timestamps?.length} points`);
+    }
+    
+    // ... reste du code ...
+}
+DONNE-MOI CES LOGS et je te dirai exactement où est le problème.
+Si tu veux une solution rapide : ROLLBACK les changements de Bug 2 (min/max forcés) temporairement pour voir si Bug 1 seul fonctionne.
