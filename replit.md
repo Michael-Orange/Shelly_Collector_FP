@@ -28,7 +28,13 @@ Core features include:
 
 ## System Design Choices
 
-- **Modular Architecture**: Services are separated into logical units (e.g., `database.py`, `cycle_detector.py`, `config_service.py`, `auth_service.py`) for maintainability.
+- **Modular Architecture**: Services are separated into logical units (e.g., `database.py`, `cycle_detector.py`, `volume_calculator.py`, `co2e_calculator.py`, `config_service.py`, `auth_service.py`) for maintainability.
+- **Unit Tests (Phase 2B)**: 30 pytest tests protect critical business logic against regressions. Structure:
+  - `tests/fixtures.py` — Reusable test data (power log tuples, pump configs, CO2e coefficients)
+  - `tests/test_cycle_detector.py` — Cycle detection: single/multi/short/empty/multi-channel, gap merging, min duration filtering
+  - `tests/test_volume_calculator.py` — Volume calculation: standard cases, edge cases (0, negative), precision
+  - `tests/test_co2e_calculator.py` — CO2e avoidance: base formula, linearity, DBO5 impact, GWP variants, MCF dominance
+  - Run with `python -m pytest` from project root
 - **Template Architecture (Phase 2A)**: Frontend refactored from monolithic Python strings into Jinja2 templates + static CSS/JS files. Structure:
   - `web/templates/` — HTML templates (dashboard.html, admin.html, admin_pumps.html)
   - `web/static/css/` — Extracted stylesheets (dashboard.css, admin.css, admin_pumps.css)

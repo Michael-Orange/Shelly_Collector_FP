@@ -7,6 +7,8 @@ import os
 import time
 import config
 from services.cycle_detector import detect_cycles
+from services.volume_calculator import calculate_volume_m3
+from services.co2e_calculator import calculate_co2e_impact
 from services.auth_service import (
     verify_admin_password, verify_csv_password,
     create_admin_session, verify_admin_token, revoke_admin_session
@@ -33,30 +35,6 @@ from services.config_versions_service import (
 )
 
 router = APIRouter(prefix="/api")
-
-
-def calculate_co2e_impact(volume_m3: float, dbo5_mg_l: float) -> dict:
-    if volume_m3 <= 0 or dbo5_mg_l <= 0:
-        return {"co2e_avoided_kg": 0, "reduction_percent": 0, "ch4_avoided_kg": 0}
-
-    dbo5_kg_per_m3 = dbo5_mg_l / 1000
-    bo_factor = 0.6
-    mcf_fosse = 0.5
-    mcf_fpv = 0.03
-    gwp_ch4 = 28
-
-    masse_dbo5_kg = volume_m3 * dbo5_kg_per_m3
-    ch4_fosse_kg = masse_dbo5_kg * bo_factor * mcf_fosse
-    ch4_fpv_kg = masse_dbo5_kg * bo_factor * mcf_fpv
-    ch4_avoided_kg = ch4_fosse_kg - ch4_fpv_kg
-    co2e_avoided_kg = ch4_avoided_kg * gwp_ch4
-    reduction_percent = (ch4_avoided_kg / ch4_fosse_kg * 100) if ch4_fosse_kg > 0 else 0
-
-    return {
-        "co2e_avoided_kg": round(co2e_avoided_kg, 2),
-        "reduction_percent": round(reduction_percent, 1),
-        "ch4_avoided_kg": round(ch4_avoided_kg, 2)
-    }
 
 
 @router.get("/pump-cycles")
@@ -177,7 +155,7 @@ async def get_pump_cycles(
             cycle['pump_type'] = pump_type
 
             if pump_type == 'relevage' and flow_rate and cycle.get('duration_minutes'):
-                volume = round((cycle['duration_minutes'] / 60) * flow_rate, 2)
+                volume = calculate_volume_m3(flow_rate, cycle['duration_minutes'])
                 cycle['volume_m3'] = volume
                 if not cycle.get('is_ongoing'):
                     treated_water_m3 += volume
