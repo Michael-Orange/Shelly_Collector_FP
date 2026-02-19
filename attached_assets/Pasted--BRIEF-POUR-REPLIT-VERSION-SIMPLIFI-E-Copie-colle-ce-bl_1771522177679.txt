@@ -1,0 +1,592 @@
+
+📋 BRIEF POUR REPLIT (VERSION SIMPLIFIÉE)
+Copie-colle ce bloc dans Replit :
+OBJECTIF : Historiser les changements de débit (flow_rate) avec dates d'effet pour calculer correctement les volumes d'eau traités sur toute la période.
+
+PROBLÈME ACTUEL :
+- device_config.flow_rate stocke UNE seule valeur par canal
+- Changement de débit = recalcul de TOUT l'historique avec la nouvelle valeur
+- Exemple : débit passe de 18m3/h à 9m3/h le 10/02 → tous les cycles avant le 10/02 sont calculés avec 9m3/h (ERREUR)
+
+SOLUTION : Créer un système d'historisation des débits avec dates d'effet
+
+═══════════════════════════════════════════════════════════════
+
+🗄️ NOUVELLE TABLE : flow_rate_history
+
+CREATE TABLE flow_rate_history (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    flow_rate REAL NOT NULL,
+    effective_from DATE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT flow_rate_positive CHECK (flow_rate > 0)
+);
+
+CREATE INDEX idx_flow_rate_history_lookup ON flow_rate_history(device_id, channel, effective_from DESC, created_at DESC);
+
+IMPORTANT : L'index inclut created_at DESC car si plusieurs entrées ont la même effective_from, on prend la plus récente (dernière saisie = correction d'erreur).
+
+═══════════════════════════════════════════════════════════════
+
+📦 MIGRATION DES DONNÉES EXISTANTES
+
+Dans services/database.py, fonction create_tables() :
+
+1. Créer la nouvelle table flow_rate_history
+
+2. Migrer les flow_rate existants depuis device_config vers flow_rate_history :
+   
+   Pour chaque device_config avec flow_rate NOT NULL :
+   - Récupérer la date de la PREMIÈRE mesure de ce device/channel dans power_logs :
+     SELECT MIN(timestamp)::date FROM power_logs WHERE device_id = X AND channel = Y
+   
+   - Si aucune mesure trouvée, utiliser '2025-01-01' par défaut
+   
+   - Insérer dans flow_rate_history avec cette date comme effective_from
+
+3. NE PAS SUPPRIMER la colonne flow_rate de device_config (garder pour compatibilité)
+
+Code de migration suggéré :
+
+async def migrate_flow_rates_to_history(pool: asyncpg.Pool):
+    """Migre les débits existants vers flow_rate_history avec dates de première mesure"""
+    async with pool.acquire() as conn:
+        # Récupérer tous les configs avec flow_rate
+        configs = await conn.fetch("""
+            SELECT device_id, channel, flow_rate 
+            FROM device_config 
+            WHERE flow_rate IS NOT NULL
+        """)
+        
+        for config in configs:
+            device_id = config['device_id']
+            channel = config['channel']
+            flow_rate = config['flow_rate']
+            
+            # Trouver la première mesure de ce device/channel
+            first_measure = await conn.fetchrow("""
+                SELECT MIN(timestamp)::date as first_date
+                FROM power_logs
+                WHERE device_id = $1 AND channel = $2
+            """, device_id, channel)
+            
+            effective_from = first_measure['first_date'] if first_measure and first_measure['first_date'] else '2025-01-01'
+            
+            # Insérer dans l'historique (ignorer si déjà existant)
+            await conn.execute("""
+                INSERT INTO flow_rate_history (device_id, channel, flow_rate, effective_from)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT DO NOTHING
+            """, device_id, channel, flow_rate, effective_from)
+            
+            print(f"✅ Migrated flow_rate for {device_id}/{channel}: {flow_rate}m³/h from {effective_from}", flush=True)
+
+Appeler cette fonction après la création de la table, dans create_tables().
+
+═══════════════════════════════════════════════════════════════
+
+🔧 SERVICES : Nouvelle fonction dans config_service.py
+
+async def add_flow_rate_history(
+    pool: asyncpg.Pool, 
+    device_id: str, 
+    channel: str, 
+    flow_rate: float, 
+    effective_from: str
+):
+    """Ajoute un nouveau débit avec date d'effet. Si même date existe, cette nouvelle saisie prévaut."""
+    async with pool.acquire() as conn:
+        # Validation
+        if flow_rate <= 0:
+            raise ValueError("Le débit doit être positif")
+        
+        # Parser la date
+        try:
+            from datetime import datetime
+            effective_date = datetime.strptime(effective_from, '%Y-%m-%d').date()
+        except ValueError:
+            raise ValueError("Format de date invalide (attendu: YYYY-MM-DD)")
+        
+        # Insérer le nouvel historique (pas de contrainte d'unicité sur effective_from)
+        await conn.execute("""
+            INSERT INTO flow_rate_history (device_id, channel, flow_rate, effective_from)
+            VALUES ($1, $2, $3, $4)
+        """, device_id, channel, flow_rate, effective_date)
+        
+        # Mettre à jour device_config.flow_rate avec la dernière valeur (pour compatibilité)
+        await conn.execute("""
+            UPDATE device_config 
+            SET flow_rate = $3, updated_at = NOW()
+            WHERE device_id = $1 AND channel = $2
+        """, device_id, channel, flow_rate)
+
+
+async def get_flow_rate_for_date(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    target_date: datetime
+) -> Optional[float]:
+    """Retourne le flow_rate applicable à une date donnée.
+    Si plusieurs entrées avec même effective_from, prend la plus récente (created_at DESC)."""
+    async with pool.acquire() as conn:
+        # Chercher le débit le plus récent AVANT ou ÉGAL à target_date
+        # Si plusieurs entrées avec même effective_from, prendre la plus récente (correction d'erreur)
+        row = await conn.fetchrow("""
+            SELECT flow_rate
+            FROM flow_rate_history
+            WHERE device_id = $1 AND channel = $2 AND effective_from <= $3
+            ORDER BY effective_from DESC, created_at DESC
+            LIMIT 1
+        """, device_id, channel, target_date.date())
+        
+        if row:
+            return row['flow_rate']
+        
+        # Fallback : si aucun historique trouvé, chercher dans device_config (legacy)
+        row = await conn.fetchrow("""
+            SELECT flow_rate FROM device_config
+            WHERE device_id = $1 AND channel = $2
+        """, device_id, channel)
+        
+        return row['flow_rate'] if row and row['flow_rate'] else None
+
+
+async def get_flow_rate_history(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str
+) -> List[Dict]:
+    """Liste tous les changements de débit pour un canal, regroupés par date d'effet."""
+    async with pool.acquire() as conn:
+        # Retourner toutes les entrées (même si plusieurs avec même effective_from)
+        # L'admin verra l'historique complet des saisies
+        rows = await conn.fetch("""
+            SELECT id, flow_rate, effective_from, created_at
+            FROM flow_rate_history
+            WHERE device_id = $1 AND channel = $2
+            ORDER BY effective_from DESC, created_at DESC
+        """, device_id, channel)
+        return [dict(row) for row in rows]
+
+═══════════════════════════════════════════════════════════════
+
+🔄 MODIFICATION : api/routes.py - Endpoint /api/pump-cycles
+
+Dans la boucle qui calcule les volumes (rechercher "flow_rate" dans le code), REMPLACER :
+
+# ANCIEN CODE (à localiser et remplacer)
+flow_rate = ch_config.get('flow_rate') if ch_config else None
+if pump_type == 'relevage' and flow_rate and cycle.get('duration_minutes'):
+    volume = round((cycle['duration_minutes'] / 60) * flow_rate, 2)
+    cycle['volume_m3'] = volume
+
+# NOUVEAU CODE
+if pump_type == 'relevage' and cycle.get('duration_minutes'):
+    # Récupérer le flow_rate historique pour la date du cycle
+    from datetime import datetime
+    cycle_date = datetime.fromisoformat(cycle['start_time'].replace('Z', '+00:00'))
+    flow_rate = await get_flow_rate_for_date(db_pool, dev, ch, cycle_date)
+    
+    if flow_rate:
+        volume = round((cycle['duration_minutes'] / 60) * flow_rate, 2)
+        cycle['volume_m3'] = volume
+        if not cycle.get('is_ongoing'):
+            treated_water_m3 += volume
+    else:
+        cycle['volume_m3'] = None
+else:
+    cycle['volume_m3'] = None
+
+IMPORTANT : Ajouter l'import en haut du fichier :
+from services.config_service import get_flow_rate_for_date
+
+═══════════════════════════════════════════════════════════════
+
+🌐 NOUVELLE API : Routes pour gérer l'historique
+
+Ajouter dans api/routes.py :
+
+@router.post("/config/flow-rate-history")
+async def add_flow_rate_history_route(request: Request):
+    """Ajoute un nouveau débit avec date d'effet"""
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        flow_rate = body.get("flow_rate")
+        effective_from = body.get("effective_from")
+        
+        if not all([device_id, channel, flow_rate, effective_from]):
+            raise HTTPException(400, "device_id, channel, flow_rate et effective_from requis")
+        
+        await add_flow_rate_history(db_pool, device_id, channel, float(flow_rate), effective_from)
+        print(f"✅ Débit historique ajouté: {device_id}/{channel} = {flow_rate}m³/h dès {effective_from}", flush=True)
+        return {"success": True}
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error adding flow rate history: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/config/flow-rate-history")
+async def get_flow_rate_history_route(
+    request: Request,
+    device_id: str = Query(...),
+    channel: str = Query(...)
+):
+    """Liste l'historique des débits d'un canal"""
+    db_pool = request.app.state.db_pool
+    try:
+        history = await get_flow_rate_history(db_pool, device_id, channel)
+        return {"history": history}
+    except Exception as e:
+        print(f"❌ Error fetching flow rate history: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+Importer les fonctions nécessaires en haut du fichier :
+from services.config_service import (
+    # ... imports existants ...
+    add_flow_rate_history,
+    get_flow_rate_history,
+    get_flow_rate_for_date
+)
+
+═══════════════════════════════════════════════════════════════
+
+🎨 INTERFACE ADMIN : Modifier web/admin.py
+
+Dans render_admin(), ajouter dans la section des canaux (après le champ débit actuel) :
+
+1. BOUTON pour afficher/masquer l'historique des débits
+
+2. PANEL COLLAPSIBLE avec :
+   - Liste des débits historiques (date d'effet, valeur, date de saisie)
+   - Formulaire d'ajout : date d'effet + nouveau débit
+   - Note explicative : "Pour corriger une erreur, ajoutez une nouvelle entrée avec la même date"
+
+3. PAS DE BOUTON DE SUPPRESSION (corrections = nouvelle saisie)
+
+STRUCTURE HTML suggérée (à intégrer dans le JS existant de web/admin.py) :
+
+Dans la section de configuration de chaque canal :
+
+<div class="flow-rate-section">
+    <div class="current-flow-rate">
+        <label>Débit actuel :</label>
+        <input type="number" value="${channel.flow_rate || ''}" readonly />
+        <span class="unit">m³/h</span>
+    </div>
+    
+    <button onclick="toggleHistory('${deviceId}', '${channelId}')" class="btn-secondary">
+        📅 Historique des débits
+    </button>
+    
+    <div id="history-${deviceId}-${channelId}" class="history-panel" style="display:none;">
+        <!-- Liste historique chargée dynamiquement -->
+        <div class="history-list"></div>
+        
+        <div class="add-new-flow-rate">
+            <h4>Ajouter un nouveau débit</h4>
+            <p class="note">💡 Pour corriger une erreur, ajoutez une nouvelle entrée avec la même date</p>
+            
+            <label>Débit (m³/h) :</label>
+            <input type="number" id="new-flow-${deviceId}-${channelId}" step="0.1" min="0.1" required />
+            
+            <label>Date d'effet :</label>
+            <input type="date" id="effective-date-${deviceId}-${channelId}" required />
+            
+            <button onclick="addFlowRateHistory('${deviceId}', '${channelId}')" class="btn-primary">
+                💾 Enregistrer ce débit
+            </button>
+        </div>
+    </div>
+</div>
+
+JAVASCRIPT à ajouter dans web/admin.py (dans la section <script>) :
+
+async function toggleHistory(deviceId, channel) {
+    const panel = document.getElementById(`history-${deviceId}-${channel}`);
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        await loadFlowRateHistory(deviceId, channel);
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+async function loadFlowRateHistory(deviceId, channel) {
+    try {
+        const response = await fetch(`/api/config/flow-rate-history?device_id=${deviceId}&channel=${channel}`);
+        const data = await response.json();
+        
+        const listDiv = document.querySelector(`#history-${deviceId}-${channel} .history-list`);
+        if (data.history.length === 0) {
+            listDiv.innerHTML = '<p class="no-data">Aucun historique de débit</p>';
+            return;
+        }
+        
+        let html = '<table class="history-table">';
+        html += '<thead><tr><th>Date d\'effet</th><th>Débit (m³/h)</th><th>Saisi le</th></tr></thead>';
+        html += '<tbody>';
+        
+        data.history.forEach(h => {
+            const effectiveDate = new Date(h.effective_from).toLocaleDateString('fr-FR');
+            const createdDate = new Date(h.created_at).toLocaleString('fr-FR');
+            html += `<tr>
+                <td><strong>${effectiveDate}</strong></td>
+                <td>${h.flow_rate}</td>
+                <td><small>${createdDate}</small></td>
+            </tr>`;
+        });
+        
+        html += '</tbody></table>';
+        listDiv.innerHTML = html;
+    } catch (e) {
+        alert('❌ Erreur de chargement de l\'historique');
+        console.error(e);
+    }
+}
+
+async function addFlowRateHistory(deviceId, channel) {
+    const flowRateInput = document.getElementById(`new-flow-${deviceId}-${channel}`);
+    const effectiveDateInput = document.getElementById(`effective-date-${deviceId}-${channel}`);
+    
+    const flowRate = flowRateInput.value;
+    const effectiveDate = effectiveDateInput.value;
+    
+    if (!flowRate || !effectiveDate) {
+        alert('⚠️ Veuillez remplir tous les champs');
+        return;
+    }
+    
+    if (parseFloat(flowRate) <= 0) {
+        alert('⚠️ Le débit doit être positif');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/config/flow-rate-history', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                device_id: deviceId,
+                channel: channel,
+                flow_rate: parseFloat(flowRate),
+                effective_from: effectiveDate
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            alert('❌ Erreur : ' + error.detail);
+            return;
+        }
+        
+        alert('✅ Débit ajouté avec succès');
+        flowRateInput.value = '';
+        effectiveDateInput.value = '';
+        await loadFlowRateHistory(deviceId, channel);
+        
+        // Recharger la config pour mettre à jour l'affichage du débit actuel
+        location.reload();
+        
+    } catch (e) {
+        alert('❌ Erreur lors de l\'ajout');
+        console.error(e);
+    }
+}
+
+CSS à ajouter dans <style> de web/admin.py :
+
+.history-panel {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+.history-table th {
+    background: #e9ecef;
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+}
+
+.history-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.add-new-flow-rate {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+}
+
+.add-new-flow-rate h4 {
+    margin-top: 0;
+    color: #495057;
+}
+
+.add-new-flow-rate .note {
+    background: #e7f3ff;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    color: #004085;
+    margin-bottom: 15px;
+}
+
+.add-new-flow-rate label {
+    display: block;
+    margin-top: 10px;
+    font-weight: 500;
+}
+
+.add-new-flow-rate input {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+    margin-top: 10px;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 15px;
+    font-weight: 500;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.no-data {
+    color: #6c757d;
+    font-style: italic;
+    padding: 20px;
+    text-align: center;
+}
+
+═══════════════════════════════════════════════════════════════
+
+📝 MISE À JOUR : replit.md
+
+Ajouter dans la section "Recent Changes" :
+
+**2026-02-19**: Historisation des débits (flow_rate) avec dates d'effet
+- **New**: Table `flow_rate_history` pour tracer les changements de débit dans le temps
+- **New**: Fonction `get_flow_rate_for_date()` pour appliquer le bon débit selon la date du cycle
+- **New**: API `/api/config/flow-rate-history` (GET/POST) pour gérer l'historique
+- **Modified**: `/api/pump-cycles` calcule les volumes avec le débit historique approprié
+- **Modified**: Interface admin avec section "Historique des débits" collapsible par canal
+- **Migration**: Débits existants migrés vers flow_rate_history avec effective_from = date de première mesure du device/channel
+- **Feature**: Correction d'erreur de saisie = nouvelle entrée avec même date (la plus récente prévaut)
+
+Ajouter dans la section "Database Schema" :
+
+CREATE TABLE flow_rate_history (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    flow_rate REAL NOT NULL CHECK (flow_rate > 0),
+    effective_from DATE NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_flow_rate_history_lookup ON flow_rate_history(device_id, channel, effective_from DESC, created_at DESC);
+
+Note: Plusieurs entrées peuvent avoir la même effective_from (corrections d'erreur). 
+La plus récente (created_at DESC) prévaut lors des calculs.
+
+═══════════════════════════════════════════════════════════════
+
+✅ TESTS À EFFECTUER
+
+1. Migration :
+   - Vérifier que les flow_rate existants sont migrés avec la date de première mesure
+   - Cas device sans mesure → utilise '2025-01-01'
+   - device_config.flow_rate reste inchangé (compatibilité)
+
+2. API :
+   - POST un nouveau débit avec effective_from = aujourd'hui → cycles passés gardent l'ancien débit
+   - POST un débit avec effective_from dans le passé → vérifier recalcul volumes
+   - POST 2 débits avec même effective_from → le dernier saisi doit prévaloir
+   - GET l'historique → ordre correct (effective_from DESC, created_at DESC)
+
+3. Dashboard :
+   - Afficher cycles sur période couvrant 2 débits différents → volumes corrects
+   - Vérifier totaux "volume traité" et calculs CO2e
+
+4. Admin :
+   - Afficher historique d'un canal → liste complète avec dates
+   - Ajouter un nouveau débit → succès et rechargement
+   - Corriger un débit (même date) → nouvelle entrée visible, calculs mis à jour
+
+5. Edge cases :
+   - Cycle avec date antérieure au premier effective_from → utilise le premier débit
+   - Aucun historique trouvé → fallback sur device_config.flow_rate
+   - Champ flow_rate vide dans device_config → volume_m3 = null
+
+═══════════════════════════════════════════════════════════════
+
+🎯 ORDRE D'IMPLÉMENTATION RECOMMANDÉ
+
+1. Créer la table flow_rate_history dans services/database.py (fonction create_tables)
+2. Créer la fonction migrate_flow_rates_to_history() et l'appeler après création table
+3. Ajouter les fonctions dans services/config_service.py
+4. Ajouter les routes API dans api/routes.py avec imports
+5. Modifier la logique de calcul des volumes dans /api/pump-cycles
+6. Tester l'API avec quelques requêtes manuelles
+7. Modifier l'interface admin (HTML + JS + CSS)
+8. Tester le workflow complet dans l'admin
+9. Vérifier les calculs sur le dashboard
+10. Mettre à jour replit.md
+✅ CHECKLIST POST-BUILD
+ Table flow_rate_history créée avec index incluant created_at DESC
+ Migration : débits existants avec date = première mesure du device/channel
+ API POST /api/config/flow-rate-history fonctionnelle
+ API GET /api/config/flow-rate-history retourne historique trié
+ Fonction get_flow_rate_for_date() avec ORDER BY correct (effective_from DESC, created_at DESC)
+ Calcul volumes dans /api/pump-cycles utilise le débit historique
+ Admin : section historique collapsible par canal
+ Admin : formulaire d'ajout avec date d'effet
+ Admin : note explicative pour corrections d'erreur
+ CSS pour styling du panel historique
+ Test : ajout de 2 débits avec même date → dernier prévaut
+ Test : volumes calculés corrects sur période multi-débits
+ Documentation replit.md mise à jour

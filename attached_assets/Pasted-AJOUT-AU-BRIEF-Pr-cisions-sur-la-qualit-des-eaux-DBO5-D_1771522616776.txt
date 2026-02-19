@@ -1,0 +1,143 @@
+AJOUT AU BRIEF : Précisions sur la qualité des eaux (DBO5/DCO/MES)
+
+Les valeurs DBO5, DCO, MES doivent suivre la MÊME logique d'historisation que flow_rate.
+
+WORKFLOWS À SUPPORTER dans l'interface admin :
+
+1. **Changement de débit seul** :
+   - User modifie flow_rate avec une date d'effet
+   - DBO5/DCO/MES restent identiques à la version précédente
+
+2. **Changement de qualité des eaux seul** :
+   - User modifie DBO5/DCO/MES avec une date d'effet
+   - flow_rate reste identique à la version précédente
+
+3. **Changement combiné** :
+   - User modifie débit + qualité des eaux en même temps
+   - Nouvelle version avec tous les nouveaux paramètres
+
+IMPORTANT dans le formulaire "Créer une nouvelle version" :
+- Afficher TOUS les champs : flow_rate, pump_type, DBO5, DCO, MES
+- Note explicative : "Seuls les champs modifiés seront mis à jour. Les champs vides conservent la valeur de la version précédente."
+- Pré-remplir le formulaire avec les valeurs actuelles pour faciliter la saisie
+
+LOGIQUE DE CRÉATION DE VERSION (fonction add_config_version) :
+- Si un paramètre n'est pas fourni dans la requête API, copier la valeur de la version précédente
+- Exemple : POST avec seulement {flow_rate: 10, effective_from: "2026-02-15"}
+  → La nouvelle version aura flow_rate=10 + copie de dbo5/dco/mes/pump_type de la version précédente
+
+Code à ajouter dans add_config_version() :
+
+async def add_config_version(...):
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # ... validation existante ...
+            
+            # Récupérer la version active actuelle pour copier les valeurs non fournies
+            current = await conn.fetchrow("""
+                SELECT channel_name, pump_model_id, flow_rate, pump_type, dbo5, dco, mes
+                FROM device_config_versions
+                WHERE device_id = $1 AND channel = $2 AND effective_to IS NULL
+                ORDER BY version DESC
+                LIMIT 1
+            """, device_id, channel)
+            
+            # Fusionner les nouvelles valeurs avec les anciennes
+            final_channel_name = channel_name if channel_name is not None else (current['channel_name'] if current else None)
+            final_pump_model_id = pump_model_id if pump_model_id is not None else (current['pump_model_id'] if current else None)
+            final_flow_rate = flow_rate if flow_rate is not None else (current['flow_rate'] if current else None)
+            final_pump_type = pump_type if pump_type is not None else (current['pump_type'] if current else None)
+            final_dbo5 = dbo5 if dbo5 is not None else (current['dbo5'] if current else None)
+            final_dco = dco if dco is not None else (current['dco'] if current else None)
+            final_mes = mes if mes is not None else (current['mes'] if current else None)
+            
+            # ... reste du code d'insertion avec final_* ...
+
+INTERFACE ADMIN - Formulaire "Créer une nouvelle version" :
+Pré-remplir avec les valeurs actuelles :
+
+async function loadCurrentValuesForNewVersion(deviceId, channel) {
+    const response = await fetch(`/api/config/current`);
+    const data = await response.json();
+    const config = data.configs.find(c => c.device_id === deviceId && c.channel === channel);
+    
+    if (config) {
+        document.getElementById(`new-version-flow-${deviceId}-${channel}`).value = config.flow_rate || '';
+        document.getElementById(`new-version-pump-type-${deviceId}-${channel}`).value = config.pump_type || '';
+        document.getElementById(`new-version-dbo5-${deviceId}-${channel}`).value = config.dbo5 || '';
+        document.getElementById(`new-version-dco-${deviceId}-${channel}`).value = config.dco || '';
+        document.getElementById(`new-version-mes-${deviceId}-${channel}`).value = config.mes || '';
+    }
+}
+
+Appeler cette fonction quand l'utilisateur ouvre le panneau "Créer une nouvelle version".
+
+AJOUT DANS LE HTML du formulaire :
+
+<div class="add-new-version">
+    <h4>Créer une nouvelle version historique</h4>
+    <p class="warning">⚠️ Ceci crée un changement de configuration à partir d'une date donnée</p>
+    <p class="info">💡 Formulaire pré-rempli avec les valeurs actuelles. Modifiez seulement ce qui change.</p>
+    
+    <label>Date d'effet :</label>
+    <input type="date" id="new-version-date-${deviceId}-${channel}" required />
+    
+    <h5>Pompage</h5>
+    <label>Débit (m³/h) :</label>
+    <input type="number" id="new-version-flow-${deviceId}-${channel}" step="0.1" />
+    
+    <label>Type de poste :</label>
+    <select id="new-version-pump-type-${deviceId}-${channel}">
+        <option value="relevage">Relevage</option>
+        <option value="sortie">Sortie</option>
+        <option value="autre">Autre</option>
+    </select>
+    
+    <h5>Qualité des eaux brutes</h5>
+    <label>DBO5 (mg/L) :</label>
+    <input type="number" id="new-version-dbo5-${deviceId}-${channel}" />
+    
+    <label>DCO (mg/L) :</label>
+    <input type="number" id="new-version-dco-${deviceId}-${channel}" />
+    
+    <label>MES (mg/L) :</label>
+    <input type="number" id="new-version-mes-${deviceId}-${channel}" />
+    
+    <button onclick="addConfigVersion('${deviceId}', '${channel}')" class="btn-primary">
+        ➕ Créer cette version
+    </button>
+</div>
+
+MODIFIER la fonction JavaScript addConfigVersion() :
+
+async function addConfigVersion(deviceId, channel) {
+    const effectiveDate = document.getElementById(`new-version-date-${deviceId}-${channel}`).value;
+    
+    if (!effectiveDate) {
+        alert('⚠️ Date d\'effet requise');
+        return;
+    }
+    
+    const data = {
+        device_id: deviceId,
+        channel: channel,
+        effective_from: effectiveDate,
+        flow_rate: parseFloatOrNull(document.getElementById(`new-version-flow-${deviceId}-${channel}`).value),
+        pump_type: document.getElementById(`new-version-pump-type-${deviceId}-${channel}`).value || null,
+        dbo5: parseIntOrNull(document.getElementById(`new-version-dbo5-${deviceId}-${channel}`).value),
+        dco: parseIntOrNull(document.getElementById(`new-version-dco-${deviceId}-${channel}`).value),
+        mes: parseIntOrNull(document.getElementById(`new-version-mes-${deviceId}-${channel}`).value)
+    };
+    
+    // ... reste du code POST ...
+}
+
+function parseFloatOrNull(value) {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? null : parsed;
+}
+
+function parseIntOrNull(value) {
+    const parsed = parseInt(value);
+    return isNaN(parsed) ? null : parsed;
+}

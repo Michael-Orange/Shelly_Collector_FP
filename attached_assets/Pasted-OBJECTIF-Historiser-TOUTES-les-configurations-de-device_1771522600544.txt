@@ -1,0 +1,1059 @@
+OBJECTIF : Historiser TOUTES les configurations de devices/canaux avec un système de versions temporelles (Slowly Changing Dimension Type 2).
+
+PROBLÈME ACTUEL :
+- device_config stocke UNE seule version de la configuration
+- flow_rate change dans le temps → recalcul incorrect de l'historique
+- Autres paramètres peuvent aussi changer (pump_type, pump_model, DBO5/DCO/MES)
+- Pas d'architecture scalable pour historiser d'autres paramètres
+
+SOLUTION : Pattern "SCD Type 2" avec table device_config_versions qui stocke toutes les versions de config avec dates d'effet.
+
+═══════════════════════════════════════════════════════════════
+
+🗄️ NOUVELLE TABLE : device_config_versions
+
+CREATE TABLE device_config_versions (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    
+    -- Configuration technique
+    channel_name VARCHAR(100),
+    pump_model_id INTEGER,
+    flow_rate REAL,
+    pump_type VARCHAR(50),
+    
+    -- Qualité des eaux
+    dbo5 INTEGER,
+    dco INTEGER,
+    mes INTEGER,
+    
+    -- Période de validité
+    effective_from DATE NOT NULL,
+    effective_to DATE,  -- NULL = version actuellement active
+    
+    -- Métadonnées
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    version INTEGER NOT NULL DEFAULT 1,
+    
+    -- Contraintes
+    CONSTRAINT flow_rate_positive CHECK (flow_rate IS NULL OR flow_rate > 0),
+    CONSTRAINT valid_date_range CHECK (effective_to IS NULL OR effective_to > effective_from),
+    CONSTRAINT pump_type_valid CHECK (pump_type IN ('relevage', 'sortie', 'autre', NULL))
+);
+
+-- Index de performance pour recherche par date
+CREATE INDEX idx_config_versions_lookup 
+ON device_config_versions(device_id, channel, effective_from DESC, effective_to DESC NULLS FIRST);
+
+-- Index pour contrainte : une seule version active par device/channel
+CREATE UNIQUE INDEX idx_config_versions_active 
+ON device_config_versions(device_id, channel) 
+WHERE effective_to IS NULL;
+
+-- Index pour unicité version
+CREATE UNIQUE INDEX idx_config_versions_unique
+ON device_config_versions(device_id, channel, effective_from, version);
+
+-- Foreign key vers pump_models (si existe)
+ALTER TABLE device_config_versions
+ADD CONSTRAINT fk_pump_model 
+FOREIGN KEY (pump_model_id) 
+REFERENCES pump_models(id) 
+ON DELETE SET NULL;
+
+═══════════════════════════════════════════════════════════════
+
+📦 MIGRATION DES DONNÉES
+
+Dans services/database.py, créer une nouvelle fonction migrate_to_config_versions() :
+
+async def migrate_to_config_versions(pool: asyncpg.Pool):
+    """Migre device_config vers device_config_versions avec dates de première mesure"""
+    async with pool.acquire() as conn:
+        # Vérifier si migration déjà effectuée
+        count = await conn.fetchval("SELECT COUNT(*) FROM device_config_versions")
+        if count > 0:
+            print("✅ Migration device_config_versions déjà effectuée, skip", flush=True)
+            return
+        
+        print("🔄 Début migration device_config → device_config_versions", flush=True)
+        
+        # Récupérer toutes les configs existantes
+        configs = await conn.fetch("""
+            SELECT device_id, channel, channel_name, pump_model_id, 
+                   flow_rate, pump_type, dbo5, dco, mes
+            FROM device_config
+        """)
+        
+        migrated = 0
+        for config in configs:
+            device_id = config['device_id']
+            channel = config['channel']
+            
+            # Trouver la date de première mesure pour ce device/channel
+            first_measure = await conn.fetchrow("""
+                SELECT MIN(timestamp)::date as first_date
+                FROM power_logs
+                WHERE device_id = $1 AND channel = $2
+            """, device_id, channel)
+            
+            # Si pas de mesure, utiliser 2025-01-01 par défaut
+            effective_from = first_measure['first_date'] if first_measure and first_measure['first_date'] else '2025-01-01'
+            
+            # Insérer dans device_config_versions (version active = effective_to NULL)
+            await conn.execute("""
+                INSERT INTO device_config_versions (
+                    device_id, channel, channel_name, pump_model_id,
+                    flow_rate, pump_type, dbo5, dco, mes,
+                    effective_from, effective_to, version
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, 1)
+            """, 
+                device_id, 
+                channel,
+                config['channel_name'],
+                config['pump_model_id'],
+                config['flow_rate'],
+                config['pump_type'],
+                config['dbo5'],
+                config['dco'],
+                config['mes'],
+                effective_from
+            )
+            
+            migrated += 1
+            print(f"  ✅ Migré {device_id}/{channel} depuis {effective_from}", flush=True)
+        
+        print(f"✅ Migration terminée : {migrated} configurations migrées", flush=True)
+
+
+IMPORTANT : Appeler cette fonction dans create_tables() APRÈS la création de device_config_versions.
+
+STRATÉGIE DE TRANSITION :
+1. Créer device_config_versions et migrer les données
+2. GARDER device_config temporairement (compatibilité)
+3. Modifier tous les services pour utiliser device_config_versions
+4. Une fois tout validé, supprimer device_config (ou la transformer en vue SQL)
+
+═══════════════════════════════════════════════════════════════
+
+🔧 SERVICES : Nouveau fichier services/config_versions_service.py
+
+Créer un nouveau service dédié à la gestion des versions de config :
+
+from typing import Optional, List, Dict
+from datetime import datetime, date, timedelta
+import asyncpg
+
+
+async def get_config_for_date(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    target_date: date
+) -> Optional[Dict]:
+    """Récupère la configuration active à une date donnée"""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT 
+                device_id, channel, channel_name, pump_model_id,
+                flow_rate, pump_type, dbo5, dco, mes,
+                effective_from, effective_to
+            FROM device_config_versions
+            WHERE device_id = $1 
+              AND channel = $2
+              AND effective_from <= $3
+              AND (effective_to IS NULL OR effective_to > $3)
+            ORDER BY effective_from DESC, version DESC
+            LIMIT 1
+        """, device_id, channel, target_date)
+        
+        return dict(row) if row else None
+
+
+async def get_current_config(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str
+) -> Optional[Dict]:
+    """Récupère la configuration actuellement active (effective_to = NULL)"""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT 
+                device_id, channel, channel_name, pump_model_id,
+                flow_rate, pump_type, dbo5, dco, mes,
+                effective_from, effective_to
+            FROM device_config_versions
+            WHERE device_id = $1 AND channel = $2 AND effective_to IS NULL
+            ORDER BY version DESC
+            LIMIT 1
+        """, device_id, channel)
+        
+        return dict(row) if row else None
+
+
+async def get_all_current_configs(pool: asyncpg.Pool) -> List[Dict]:
+    """Récupère toutes les configurations actuellement actives"""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                device_id, channel, channel_name, pump_model_id,
+                flow_rate, pump_type, dbo5, dco, mes,
+                effective_from
+            FROM device_config_versions
+            WHERE effective_to IS NULL
+            ORDER BY device_id, channel
+        """)
+        
+        return [dict(row) for row in rows]
+
+
+async def get_config_history(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str
+) -> List[Dict]:
+    """Liste toutes les versions d'une configuration"""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                id, device_id, channel, channel_name, pump_model_id,
+                flow_rate, pump_type, dbo5, dco, mes,
+                effective_from, effective_to, created_at, version
+            FROM device_config_versions
+            WHERE device_id = $1 AND channel = $2
+            ORDER BY effective_from DESC, version DESC
+        """, device_id, channel)
+        
+        return [dict(row) for row in rows]
+
+
+async def add_config_version(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    effective_from: date,
+    channel_name: Optional[str] = None,
+    pump_model_id: Optional[int] = None,
+    flow_rate: Optional[float] = None,
+    pump_type: Optional[str] = None,
+    dbo5: Optional[int] = None,
+    dco: Optional[int] = None,
+    mes: Optional[int] = None
+):
+    """
+    Ajoute une nouvelle version de configuration à partir d'une date.
+    Ferme automatiquement la version précédente (effective_to = effective_from - 1 jour).
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Validation
+            if flow_rate is not None and flow_rate <= 0:
+                raise ValueError("Le débit doit être positif")
+            
+            if pump_type and pump_type not in ['relevage', 'sortie', 'autre']:
+                raise ValueError("pump_type invalide")
+            
+            # Récupérer la version active actuelle
+            current = await conn.fetchrow("""
+                SELECT id, effective_from, version
+                FROM device_config_versions
+                WHERE device_id = $1 AND channel = $2 AND effective_to IS NULL
+                ORDER BY version DESC
+                LIMIT 1
+            """, device_id, channel)
+            
+            # Vérifier cohérence temporelle
+            if current:
+                if effective_from <= current['effective_from']:
+                    # Cas de correction : même date ou antérieure
+                    # Incrémenter la version
+                    new_version = current['version'] + 1
+                    
+                    # Clôturer la version précédente
+                    closing_date = effective_from - timedelta(days=1)
+                    await conn.execute("""
+                        UPDATE device_config_versions
+                        SET effective_to = $3
+                        WHERE id = $1 AND effective_to IS NULL
+                    """, current['id'], device_id, closing_date)
+                else:
+                    # Cas normal : nouvelle période
+                    new_version = 1
+                    
+                    # Clôturer la version précédente
+                    closing_date = effective_from - timedelta(days=1)
+                    await conn.execute("""
+                        UPDATE device_config_versions
+                        SET effective_to = $3
+                        WHERE id = $1
+                    """, current['id'], closing_date)
+            else:
+                # Première version pour ce device/channel
+                new_version = 1
+            
+            # Insérer la nouvelle version
+            await conn.execute("""
+                INSERT INTO device_config_versions (
+                    device_id, channel, channel_name, pump_model_id,
+                    flow_rate, pump_type, dbo5, dco, mes,
+                    effective_from, effective_to, version
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11)
+            """, 
+                device_id, channel, channel_name, pump_model_id,
+                flow_rate, pump_type, dbo5, dco, mes,
+                effective_from, new_version
+            )
+            
+            print(f"✅ Config version ajoutée: {device_id}/{channel} v{new_version} depuis {effective_from}", flush=True)
+
+
+async def update_current_config(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    channel_name: Optional[str] = None,
+    pump_model_id: Optional[int] = None,
+    flow_rate: Optional[float] = None,
+    pump_type: Optional[str] = None,
+    dbo5: Optional[int] = None,
+    dco: Optional[int] = None,
+    mes: Optional[int] = None
+):
+    """
+    Met à jour la configuration actuelle (effective_to = NULL) en place.
+    Utilisé pour modifications mineures sans créer de nouvelle version historique.
+    """
+    async with pool.acquire() as conn:
+        # Construire la requête dynamiquement selon les champs fournis
+        updates = []
+        params = [device_id, channel]
+        param_idx = 3
+        
+        if channel_name is not None:
+            updates.append(f"channel_name = ${param_idx}")
+            params.append(channel_name)
+            param_idx += 1
+        
+        if pump_model_id is not None:
+            updates.append(f"pump_model_id = ${param_idx}")
+            params.append(pump_model_id)
+            param_idx += 1
+        
+        if flow_rate is not None:
+            if flow_rate <= 0:
+                raise ValueError("Le débit doit être positif")
+            updates.append(f"flow_rate = ${param_idx}")
+            params.append(flow_rate)
+            param_idx += 1
+        
+        if pump_type is not None:
+            if pump_type not in ['relevage', 'sortie', 'autre']:
+                raise ValueError("pump_type invalide")
+            updates.append(f"pump_type = ${param_idx}")
+            params.append(pump_type)
+            param_idx += 1
+        
+        if dbo5 is not None:
+            updates.append(f"dbo5 = ${param_idx}")
+            params.append(dbo5)
+            param_idx += 1
+        
+        if dco is not None:
+            updates.append(f"dco = ${param_idx}")
+            params.append(dco)
+            param_idx += 1
+        
+        if mes is not None:
+            updates.append(f"mes = ${param_idx}")
+            params.append(mes)
+            param_idx += 1
+        
+        if not updates:
+            return  # Rien à mettre à jour
+        
+        query = f"""
+            UPDATE device_config_versions
+            SET {', '.join(updates)}
+            WHERE device_id = $1 AND channel = $2 AND effective_to IS NULL
+        """
+        
+        await conn.execute(query, *params)
+        print(f"✅ Config actuelle mise à jour: {device_id}/{channel}", flush=True)
+
+
+async def bulk_load_configs_for_period(
+    pool: asyncpg.Pool,
+    device_id: str,
+    channel: str,
+    start_date: date,
+    end_date: date
+) -> List[Dict]:
+    """
+    Charge toutes les versions de config couvrant une période donnée.
+    Utilisé pour optimiser les calculs sur de nombreux cycles.
+    Retourne une liste triée par effective_from DESC.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                device_id, channel, flow_rate, pump_type, 
+                dbo5, dco, mes, effective_from, effective_to
+            FROM device_config_versions
+            WHERE device_id = $1 
+              AND channel = $2
+              AND effective_from <= $4
+              AND (effective_to IS NULL OR effective_to >= $3)
+            ORDER BY effective_from DESC, version DESC
+        """, device_id, channel, start_date, end_date)
+        
+        return [dict(row) for row in rows]
+
+
+def find_config_for_date_in_memory(configs: List[Dict], target_date: date) -> Optional[Dict]:
+    """
+    Cherche la config applicable à une date dans une liste déjà chargée en mémoire.
+    Configs doivent être triées par effective_from DESC.
+    """
+    for config in configs:
+        effective_from = config['effective_from']
+        effective_to = config['effective_to']
+        
+        if effective_from <= target_date and (effective_to is None or effective_to > target_date):
+            return config
+    
+    return None
+
+═══════════════════════════════════════════════════════════════
+
+🔄 MODIFICATION : api/routes.py - Endpoint /api/pump-cycles
+
+REMPLACER toute la section de chargement des configs par :
+
+from services.config_versions_service import bulk_load_configs_for_period, find_config_for_date_in_memory
+
+# Au début de la route, après avoir récupéré start_date et end_date :
+
+# Charger TOUTES les configs en une seule fois pour la période
+configs_cache = {}  # {(device_id, channel): [configs]}
+
+for dev in devices:
+    for ch in channels:
+        configs = await bulk_load_configs_for_period(
+            db_pool, dev, ch, 
+            start_date.date(), 
+            end_date.date()
+        )
+        configs_cache[(dev, ch)] = configs
+
+# Ensuite, dans la boucle des cycles, REMPLACER :
+
+# ANCIEN CODE (à supprimer)
+ch_config = await get_channel_config(db_pool, dev, ch)
+flow_rate = ch_config.get('flow_rate') if ch_config else None
+pump_type = ch_config.get('pump_type') if ch_config else None
+
+# NOUVEAU CODE
+cycle_date = datetime.fromisoformat(cycle['start_time'].replace('Z', '+00:00')).date()
+config = find_config_for_date_in_memory(configs_cache.get((dev, ch), []), cycle_date)
+
+pump_type = config['pump_type'] if config else None
+flow_rate = config['flow_rate'] if config else None
+
+if pump_type == 'relevage' and flow_rate and cycle.get('duration_minutes'):
+    volume = round((cycle['duration_minutes'] / 60) * flow_rate, 2)
+    cycle['volume_m3'] = volume
+    if not cycle.get('is_ongoing'):
+        treated_water_m3 += volume
+else:
+    cycle['volume_m3'] = None
+
+# Pour le calcul CO2e, utiliser aussi config['dbo5'], config['dco'], config['mes']
+
+═══════════════════════════════════════════════════════════════
+
+🌐 NOUVELLES ROUTES API : api/routes.py
+
+Ajouter ces endpoints pour gérer les versions de config :
+
+from services.config_versions_service import (
+    get_current_config,
+    get_all_current_configs,
+    get_config_history,
+    add_config_version,
+    update_current_config
+)
+
+@router.get("/config/current")
+async def get_all_current_configs_route(request: Request):
+    """Liste toutes les configurations actuellement actives"""
+    db_pool = request.app.state.db_pool
+    try:
+        configs = await get_all_current_configs(db_pool)
+        return {"configs": configs}
+    except Exception as e:
+        print(f"❌ Error fetching current configs: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/config/history")
+async def get_config_history_route(
+    request: Request,
+    device_id: str = Query(...),
+    channel: str = Query(...)
+):
+    """Liste toutes les versions historiques d'une configuration"""
+    db_pool = request.app.state.db_pool
+    try:
+        history = await get_config_history(db_pool, device_id, channel)
+        return {"history": history}
+    except Exception as e:
+        print(f"❌ Error fetching config history: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/version")
+async def add_config_version_route(request: Request):
+    """
+    Ajoute une nouvelle version de configuration avec date d'effet.
+    Clôture automatiquement la version précédente.
+    """
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        effective_from_str = body.get("effective_from")
+        
+        if not all([device_id, channel, effective_from_str]):
+            raise HTTPException(400, "device_id, channel et effective_from requis")
+        
+        # Parser la date
+        from datetime import datetime
+        effective_from = datetime.strptime(effective_from_str, '%Y-%m-%d').date()
+        
+        # Extraire les champs optionnels
+        await add_config_version(
+            db_pool,
+            device_id,
+            channel,
+            effective_from,
+            channel_name=body.get("channel_name"),
+            pump_model_id=body.get("pump_model_id"),
+            flow_rate=body.get("flow_rate"),
+            pump_type=body.get("pump_type"),
+            dbo5=body.get("dbo5"),
+            dco=body.get("dco"),
+            mes=body.get("mes")
+        )
+        
+        return {"success": True}
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error adding config version: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/config/current")
+async def update_current_config_route(request: Request):
+    """
+    Met à jour la configuration actuelle sans créer de version historique.
+    Utilisé pour corrections mineures du présent.
+    """
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        device_id = body.get("device_id")
+        channel = body.get("channel")
+        
+        if not all([device_id, channel]):
+            raise HTTPException(400, "device_id et channel requis")
+        
+        await update_current_config(
+            db_pool,
+            device_id,
+            channel,
+            channel_name=body.get("channel_name"),
+            pump_model_id=body.get("pump_model_id"),
+            flow_rate=body.get("flow_rate"),
+            pump_type=body.get("pump_type"),
+            dbo5=body.get("dbo5"),
+            dco=body.get("dco"),
+            mes=body.get("mes")
+        )
+        
+        return {"success": True}
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error updating current config: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+═══════════════════════════════════════════════════════════════
+
+🎨 INTERFACE ADMIN : Refonte complète web/admin.py
+
+L'admin doit maintenant permettre :
+
+1. AFFICHAGE de la config actuelle (effective_to = NULL)
+2. MODIFICATION RAPIDE de la config actuelle (update in place, sans versioning)
+3. HISTORIQUE collapsible avec toutes les versions passées
+4. AJOUT D'UNE NOUVELLE VERSION avec date d'effet (pour changements réels)
+
+STRUCTURE HTML POUR CHAQUE CANAL :
+
+<div class="channel-config">
+    <h3>${channel} - ${config.channel_name || 'Sans nom'}</h3>
+    
+    <!-- CONFIG ACTUELLE : modification rapide -->
+    <div class="current-config-form">
+        <h4>Configuration actuelle</h4>
+        <p class="info">💡 Modifications ici = mise à jour immédiate sans historique</p>
+        
+        <label>Nom du canal :</label>
+        <input type="text" id="name-${deviceId}-${channel}" value="${config.channel_name || ''}" />
+        
+        <label>Modèle de pompe :</label>
+        <select id="pump-model-${deviceId}-${channel}">
+            <option value="">Aucun</option>
+            <!-- Charger depuis pump_models -->
+        </select>
+        
+        <label>Débit (m³/h) :</label>
+        <input type="number" id="flow-rate-${deviceId}-${channel}" value="${config.flow_rate || ''}" step="0.1" />
+        
+        <label>Type de poste :</label>
+        <select id="pump-type-${deviceId}-${channel}">
+            <option value="relevage">Relevage</option>
+            <option value="sortie">Sortie</option>
+            <option value="autre">Autre</option>
+        </select>
+        
+        <div class="water-quality">
+            <label>DBO5 (mg/L) :</label>
+            <input type="number" id="dbo5-${deviceId}-${channel}" value="${config.dbo5 || ''}" />
+            
+            <label>DCO (mg/L) :</label>
+            <input type="number" id="dco-${deviceId}-${channel}" value="${config.dco || ''}" />
+            
+            <label>MES (mg/L) :</label>
+            <input type="number" id="mes-${deviceId}-${channel}" value="${config.mes || ''}" />
+        </div>
+        
+        <button onclick="updateCurrentConfig('${deviceId}', '${channel}')" class="btn-primary">
+            💾 Enregistrer la config actuelle
+        </button>
+    </div>
+    
+    <!-- HISTORIQUE DES VERSIONS -->
+    <button onclick="toggleVersionHistory('${deviceId}', '${channel}')" class="btn-secondary">
+        📜 Historique des versions
+    </button>
+    
+    <div id="version-history-${deviceId}-${channel}" class="version-panel" style="display:none;">
+        <div class="history-list"></div>
+        
+        <!-- AJOUT NOUVELLE VERSION -->
+        <div class="add-new-version">
+            <h4>Créer une nouvelle version historique</h4>
+            <p class="warning">⚠️ Ceci crée un changement de configuration à partir d'une date donnée</p>
+            
+            <label>Date d'effet :</label>
+            <input type="date" id="new-version-date-${deviceId}-${channel}" required />
+            
+            <label>Changements à appliquer :</label>
+            
+            <label>Nouveau débit (m³/h) :</label>
+            <input type="number" id="new-version-flow-${deviceId}-${channel}" step="0.1" />
+            
+            <label>Nouveau type de poste :</label>
+            <select id="new-version-pump-type-${deviceId}-${channel}">
+                <option value="">Ne pas changer</option>
+                <option value="relevage">Relevage</option>
+                <option value="sortie">Sortie</option>
+                <option value="autre">Autre</option>
+            </select>
+            
+            <button onclick="addConfigVersion('${deviceId}', '${channel}')" class="btn-primary">
+                ➕ Créer cette version
+            </button>
+        </div>
+    </div>
+</div>
+
+JAVASCRIPT :
+
+async function updateCurrentConfig(deviceId, channel) {
+    const data = {
+        device_id: deviceId,
+        channel: channel,
+        channel_name: document.getElementById(`name-${deviceId}-${channel}`).value,
+        pump_model_id: parseInt(document.getElementById(`pump-model-${deviceId}-${channel}`).value) || null,
+        flow_rate: parseFloat(document.getElementById(`flow-rate-${deviceId}-${channel}`).value) || null,
+        pump_type: document.getElementById(`pump-type-${deviceId}-${channel}`).value,
+        dbo5: parseInt(document.getElementById(`dbo5-${deviceId}-${channel}`).value) || null,
+        dco: parseInt(document.getElementById(`dco-${deviceId}-${channel}`).value) || null,
+        mes: parseInt(document.getElementById(`mes-${deviceId}-${channel}`).value) || null
+    };
+    
+    try {
+        const response = await fetch('/api/config/current', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            alert('❌ Erreur : ' + error.detail);
+            return;
+        }
+        
+        alert('✅ Configuration mise à jour');
+    } catch (e) {
+        alert('❌ Erreur réseau');
+        console.error(e);
+    }
+}
+
+async function toggleVersionHistory(deviceId, channel) {
+    const panel = document.getElementById(`version-history-${deviceId}-${channel}`);
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        await loadVersionHistory(deviceId, channel);
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+async function loadVersionHistory(deviceId, channel) {
+    try {
+        const response = await fetch(`/api/config/history?device_id=${deviceId}&channel=${channel}`);
+        const data = await response.json();
+        
+        const listDiv = document.querySelector(`#version-history-${deviceId}-${channel} .history-list`);
+        
+        if (data.history.length === 0) {
+            listDiv.innerHTML = '<p class="no-data">Aucune version historique</p>';
+            return;
+        }
+        
+        let html = '<table class="version-table">';
+        html += '<thead><tr><th>Période</th><th>Débit</th><th>Type</th><th>DBO5/DCO/MES</th><th>Version</th></tr></thead>';
+        html += '<tbody>';
+        
+        data.history.forEach(v => {
+            const from = new Date(v.effective_from).toLocaleDateString('fr-FR');
+            const to = v.effective_to ? new Date(v.effective_to).toLocaleDateString('fr-FR') : 'Actuel';
+            const period = `${from} → ${to}`;
+            
+            const flow = v.flow_rate ? `${v.flow_rate} m³/h` : '-';
+            const type = v.pump_type || '-';
+            const water = `${v.dbo5 || '-'} / ${v.dco || '-'} / ${v.mes || '-'}`;
+            
+            html += `<tr>
+                <td><strong>${period}</strong></td>
+                <td>${flow}</td>
+                <td>${type}</td>
+                <td>${water}</td>
+                <td>v${v.version}</td>
+            </tr>`;
+        });
+        
+        html += '</tbody></table>';
+        listDiv.innerHTML = html;
+    } catch (e) {
+        alert('❌ Erreur de chargement');
+        console.error(e);
+    }
+}
+
+async function addConfigVersion(deviceId, channel) {
+    const effectiveDate = document.getElementById(`new-version-date-${deviceId}-${channel}`).value;
+    const flowRate = document.getElementById(`new-version-flow-${deviceId}-${channel}`).value;
+    const pumpType = document.getElementById(`new-version-pump-type-${deviceId}-${channel}`).value;
+    
+    if (!effectiveDate) {
+        alert('⚠️ Date d\'effet requise');
+        return;
+    }
+    
+    if (!flowRate && !pumpType) {
+        alert('⚠️ Spécifiez au moins un changement (débit ou type)');
+        return;
+    }
+    
+    const data = {
+        device_id: deviceId,
+        channel: channel,
+        effective_from: effectiveDate,
+        flow_rate: flowRate ? parseFloat(flowRate) : null,
+        pump_type: pumpType || null
+    };
+    
+    try {
+        const response = await fetch('/api/config/version', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            alert('❌ Erreur : ' + error.detail);
+            return;
+        }
+        
+        alert('✅ Nouvelle version créée');
+        document.getElementById(`new-version-date-${deviceId}-${channel}`).value = '';
+        document.getElementById(`new-version-flow-${deviceId}-${channel}`).value = '';
+        document.getElementById(`new-version-pump-type-${deviceId}-${channel}`).value = '';
+        
+        await loadVersionHistory(deviceId, channel);
+    } catch (e) {
+        alert('❌ Erreur réseau');
+        console.error(e);
+    }
+}
+
+CSS à ajouter :
+
+.channel-config {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background: white;
+}
+
+.current-config-form {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 15px;
+}
+
+.current-config-form .info {
+    background: #d1ecf1;
+    color: #0c5460;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    margin-bottom: 15px;
+}
+
+.version-panel {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.version-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+.version-table th {
+    background: #e9ecef;
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+}
+
+.version-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.add-new-version {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    border: 2px solid #ffc107;
+}
+
+.add-new-version .warning {
+    background: #fff3cd;
+    color: #856404;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    margin-bottom: 15px;
+}
+
+.water-quality {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 15px 0;
+}
+
+═══════════════════════════════════════════════════════════════
+
+♻️ TRANSITION : Garder device_config temporairement
+
+NE PAS supprimer device_config immédiatement. Stratégie :
+
+1. Phase 1 : Créer device_config_versions et migrer les données
+2. Phase 2 : Modifier tous les services pour utiliser device_config_versions
+3. Phase 3 : Tester en prod pendant 1-2 semaines
+4. Phase 4 : Supprimer device_config (ou la transformer en vue matérialisée)
+
+Optionnel : Créer une vue SQL pour compatibilité :
+
+CREATE OR REPLACE VIEW device_config AS
+SELECT 
+    device_id, 
+    channel, 
+    channel_name, 
+    pump_model_id,
+    flow_rate, 
+    pump_type, 
+    dbo5, 
+    dco, 
+    mes,
+    NOW() as updated_at  -- Fake pour compatibilité
+FROM device_config_versions
+WHERE effective_to IS NULL;
+
+Cela permet aux anciens services non migrés de continuer à fonctionner.
+
+═══════════════════════════════════════════════════════════════
+
+📝 MISE À JOUR : replit.md
+
+Ajouter dans "Recent Changes" :
+
+**2026-02-19**: Refonte architecture - Système de versions de configuration (SCD Type 2)
+
+- **Breaking**: Nouvelle table `device_config_versions` pour historiser TOUTES les configurations
+- **New**: Pattern Slowly Changing Dimension Type 2 avec effective_from/effective_to
+- **New**: Service `config_versions_service.py` avec gestion complète des versions
+- **New**: API `/api/config/version` (POST) pour créer une nouvelle version avec date d'effet
+- **New**: API `/api/config/current` (GET/PUT) pour lire/modifier la config actuelle
+- **New**: API `/api/config/history` (GET) pour lister toutes les versions
+- **New**: Fonction `bulk_load_configs_for_period()` pour optimisation performance
+- **Modified**: `/api/pump-cycles` charge les configs en une seule requête pour toute la période
+- **Modified**: Interface admin séparée : modification rapide vs création de version historique
+- **Migration**: Toutes les configs migrées depuis `device_config` avec date de première mesure
+- **Scalability**: Ajout futur de nouveaux paramètres historisables = ajout colonne (pas nouvelle table)
+
+Ajouter dans "Architecture Decisions" :
+
+**Config Versioning (SCD Type 2)**
+
+Rationale :
+- flow_rate change dans le temps → besoin d'historisation
+- pump_type, pump_model, qualité eaux peuvent aussi changer
+- Pattern SCD Type 2 = standard data warehousing, éprouvé et scalable
+
+Design choices :
+- effective_from + effective_to (NULL = version active)
+- Index UNIQUE sur (device_id, channel) WHERE effective_to IS NULL (une seule version active)
+- Version number pour gérer corrections d'erreur (même effective_from)
+- Foreign key vers pump_models avec ON DELETE SET NULL
+- Bulk loading pour optimiser calculs sur grandes périodes
+
+Trade-offs :
+- Plus complexe qu'une simple table
+- Migration requise (risque opérationnel)
+- Gain : traçabilité complète, calculs historiques précis, scalabilité
+
+Ajouter dans "Database Schema" :
+
+CREATE TABLE device_config_versions (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL,
+    channel VARCHAR(20) NOT NULL,
+    channel_name VARCHAR(100),
+    pump_model_id INTEGER REFERENCES pump_models(id) ON DELETE SET NULL,
+    flow_rate REAL CHECK (flow_rate IS NULL OR flow_rate > 0),
+    pump_type VARCHAR(50) CHECK (pump_type IN ('relevage', 'sortie', 'autre', NULL)),
+    dbo5 INTEGER,
+    dco INTEGER,
+    mes INTEGER,
+    effective_from DATE NOT NULL,
+    effective_to DATE CHECK (effective_to IS NULL OR effective_to > effective_from),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    version INTEGER NOT NULL DEFAULT 1
+);
+
+-- Indexes
+CREATE INDEX idx_config_versions_lookup ON device_config_versions(device_id, channel, effective_from DESC, effective_to DESC NULLS FIRST);
+CREATE UNIQUE INDEX idx_config_versions_active ON device_config_versions(device_id, channel) WHERE effective_to IS NULL;
+CREATE UNIQUE INDEX idx_config_versions_unique ON device_config_versions(device_id, channel, effective_from, version);
+
+-- Vue de compatibilité (optionnel)
+CREATE OR REPLACE VIEW device_config AS
+SELECT device_id, channel, channel_name, pump_model_id, flow_rate, pump_type, dbo5, dco, mes, NOW() as updated_at
+FROM device_config_versions
+WHERE effective_to IS NULL;
+
+═══════════════════════════════════════════════════════════════
+
+✅ TESTS À EFFECTUER
+
+1. Migration :
+   - Table device_config_versions créée avec tous les index
+   - Données migrées avec dates de première mesure correctes
+   - Vue device_config fonctionnelle (si créée)
+
+2. API Config Versions :
+   - GET /api/config/current → retourne toutes les configs actives
+   - GET /api/config/history?device_id=X&channel=Y → retourne historique complet
+   - POST /api/config/version avec effective_from = aujourd'hui → version créée, précédente clôturée
+   - POST /api/config/version avec effective_from = date passée → version insérée, calculs historiques recalculés
+   - PUT /api/config/current → modification en place sans nouvelle version
+
+3. Calcul des volumes :
+   - /api/pump-cycles sur période multi-versions → volumes corrects selon les débits historiques
+   - Performance : temps de réponse acceptable (bulk loading)
+   - Edge case : cycle avant première version → utilise première version disponible
+
+4. Admin UI :
+   - Modification config actuelle → sauvegarde OK, pas de nouvelle version créée
+   - Affichage historique → toutes les versions visibles avec périodes
+   - Ajout nouvelle version → formulaire fonctionne, historique mis à jour
+   - Correction (même date) → version incrémentée, calculs utilisent la plus récente
+
+5. Intégrité :
+   - Foreign key pump_models fonctionne
+   - Contrainte : une seule version active par device/channel
+   - Validation flow_rate > 0
+   - Validation pump_type in ('relevage', 'sortie', 'autre')
+
+6. Compatibilité :
+   - Vue device_config retourne les configs actuelles
+   - Anciens services utilisant device_config continuent de fonctionner (si vue créée)
+
+═══════════════════════════════════════════════════════════════
+
+🎯 ORDRE D'IMPLÉMENTATION RECOMMANDÉ
+
+1. Créer la table device_config_versions avec tous les index et contraintes
+2. Créer la fonction migrate_to_config_versions() dans services/database.py
+3. Appeler la migration dans create_tables()
+4. Créer services/config_versions_service.py avec toutes les fonctions
+5. Ajouter les routes API dans api/routes.py
+6. Modifier /api/pump-cycles pour utiliser bulk_load + recherche mémoire
+7. Tester les API avec curl/Postman
+8. Créer la vue device_config (compatibilité)
+9. Refondre l'interface admin avec les deux modes (update current / add version)
+10. Tester le workflow complet dans l'admin
+11. Vérifier les calculs sur le dashboard (volumes, CO2e)
+12. Mettre à jour replit.md avec architecture decision
+13. Monitoring : surveiller les performances en prod pendant 1 semaine
+14. Optionnel : Supprimer la table device_config si vue suffisante
+
+⚠️ POINTS CRITIQUES :
+- Tester la migration sur une copie de DB avant la prod
+- Backup de device_config avant migration
+- Vérifier les calculs historiques après migration (spot check sur quelques cycles)
+- Documenter le nouveau workflow pour les futurs devs
