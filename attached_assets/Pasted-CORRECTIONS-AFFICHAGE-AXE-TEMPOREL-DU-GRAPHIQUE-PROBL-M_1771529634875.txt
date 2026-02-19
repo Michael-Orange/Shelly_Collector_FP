@@ -1,0 +1,211 @@
+CORRECTIONS AFFICHAGE AXE TEMPOREL DU GRAPHIQUE
+
+PROBLÈMES IDENTIFIÉS :
+
+1. "Dernières 24h" part de la dernière mesure, pas de maintenant
+2. Heures non arrondies (05:08, 05:52) au lieu d'heures rondes (05:00, 06:00)
+3. Date répétée à chaque heure sur axe X (19/02 00:00, 19/02 00:44, etc.)
+
+═══════════════════════════════════════════════════════════════
+
+CORRECTIONS À IMPLÉMENTER
+
+1. PÉRIODE "DERNIÈRES 24H" = 24H AVANT MAINTENANT
+
+Dans l'endpoint /api/power-chart-data :
+
+Actuellement (INCORRECT) :
+- end_datetime = dernière mesure en base ou date sélectionnée
+- start_time = end_datetime - 24h
+
+CORRECTION :
+- Si aucune date sélectionnée (défaut) : end_datetime = NOW()
+- start_time = NOW() - 24h
+- Ignorer la date de la dernière mesure
+
+Comportement attendu :
+- Il est 19/02/2026 à 19:33
+- Vue "24h" affiche : 18/02/2026 19:00 → 19/02/2026 19:00
+- PAS : dernière mesure (ex: 19/02 14:00) - 24h
+
+2. ARRONDIR LES HEURES SUR L'AXE X
+
+Dans la configuration Chart.js, modifier les options de l'axe X :
+
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'hour',  // Forcer l'unité à l'heure
+            stepSize: 1,    // Pas de 1 heure
+            displayFormats: {
+                hour: 'HH:mm'  // Format heures:minutes
+            },
+            round: 'hour'  // IMPORTANT : arrondir à l'heure
+        },
+        title: {
+            display: true,
+            text: 'Temps'
+        },
+        ticks: {
+            source: 'auto',
+            autoSkip: true,
+            maxRotation: 0,
+            major: {
+                enabled: true
+            }
+        }
+    }
+}
+
+Résultat :
+- Affichage : 00:00, 01:00, 02:00, 05:00, 06:00
+- PAS : 00:44, 01:28, 05:08, 05:52
+
+3. AFFICHER LE JOUR SEULEMENT AU CHANGEMENT (MINUIT)
+
+Configuration Chart.js pour l'axe X :
+
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'hour',
+            displayFormats: {
+                hour: 'HH:mm',      // Format normal : juste l'heure
+                day: 'dd/MM HH:mm'  // Au changement de jour : date + heure
+            },
+            round: 'hour'
+        },
+        ticks: {
+            major: {
+                enabled: true  // Active les "major ticks" pour les changements de jour
+            },
+            callback: function(value, index, ticks) {
+                const date = new Date(value);
+                const prevDate = index > 0 ? new Date(ticks[index - 1].value) : null;
+                
+                // Si c'est le premier tick OU si le jour a changé
+                if (index === 0 || (prevDate && date.getDate() !== prevDate.getDate())) {
+                    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                           date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                }
+                
+                // Sinon, juste l'heure
+                return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            }
+        }
+    }
+}
+
+Résultat attendu sur axe X (pour 24h couvrant 18/02-19/02) :
+18/02 20:00  21:00  22:00  23:00  19/02 00:00  01:00  02:00  ...  19:00
+
+Comportement :
+- Premier tick : affiche date + heure
+- Ticks suivants : juste heure
+- À minuit (changement de jour) : affiche nouvelle date + heure
+
+═══════════════════════════════════════════════════════════════
+
+AGRÉGATION DES DONNÉES
+
+Pour avoir des heures rondes, l'agrégation SQL doit aussi être ajustée :
+
+Dans /api/power-chart-data, pour period="24h" :
+
+ANCIEN (à corriger) :
+date_trunc('1 minute', timestamp) as time_bucket
+
+NOUVEAU :
+date_trunc('hour', timestamp) as time_bucket
+
+OU pour garder plus de détails (5 minutes) :
+date_trunc('hour', timestamp) +
+INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM timestamp) / 5) as time_bucket
+
+RECOMMANDATION :
+- 24h : agrégation par tranche de 5 minutes (288 points)
+- 7 jours : agrégation par heure (168 points)
+- 30 jours : agrégation par 6 heures (120 points)
+
+Mais affichage axe X toujours en heures rondes grâce à round: 'hour'.
+
+═══════════════════════════════════════════════════════════════
+
+ADAPTATION POUR PÉRIODE 7 JOURS ET 30 JOURS
+
+1. VUE "7 JOURS" :
+
+Axe X :
+- Unité : jour
+- Format : dd/MM
+- Pas besoin d'afficher les heures
+
+Configuration :
+time: {
+unit: 'day',
+displayFormats: {
+day: 'dd/MM'
+}
+}
+
+2. VUE "30 JOURS" :
+
+Axe X :
+- Unité : jour
+- Format : dd/MM
+- Espacement automatique pour éviter surcharge
+
+Configuration :
+time: {
+unit: 'day',
+displayFormats: {
+day: 'dd/MM'
+},
+stepSize: 2  // Afficher tous les 2 jours si nécessaire
+}
+
+═══════════════════════════════════════════════════════════════
+
+TESTS À EFFECTUER
+
+1. Vue 24h à 14:30 :
+   - Axe X commence à (hier) 14:00 ou 15:00
+   - Axe X finit à (aujourd'hui) 14:00 ou 15:00
+   - Heures affichées : 15:00, 16:00, 17:00... 13:00, 14:00
+   - Date affichée seulement au changement de jour (à minuit)
+
+2. Vue 24h couvrant UN SEUL jour (ex: 19/02 8h → 19/02 8h) :
+   - Date "19/02" affichée une seule fois au début
+   - Heures : 08:00, 09:00, 10:00... 07:00
+
+3. Vue 7 jours :
+   - Dates : 13/02, 14/02, 15/02... 19/02
+   - Pas d'heures affichées
+
+4. Vue 30 jours :
+   - Dates espacées (ex: 20/01, 22/01, 24/01... 19/02)
+   - Lisible même avec 30 points
+
+5. Changement de date "Jusqu'au" :
+   - Période recalculée à partir de cette date, pas de la dernière mesure
+
+═══════════════════════════════════════════════════════════════
+
+RÉSUMÉ DES CHANGEMENTS
+
+BACKEND (/api/power-chart-data) :
+- Si period="24h" et pas de end_date → end_datetime = NOW() (pas dernière mesure)
+- Agrégation SQL adaptée (5 min pour 24h, 1h pour 7j, 6h pour 30j)
+
+FRONTEND (Chart.js) :
+- round: 'hour' pour arrondir l'affichage
+- ticks.callback custom pour afficher date seulement au changement
+- Adaptation unit selon période (hour/day)
+- stepSize pour contrôler espacement
+
+RÉSULTAT VISUEL :
+- Axe X propre avec heures rondes
+- Date visible seulement quand nécessaire
+- Période "24h" = vraiment les 24 dernières heures

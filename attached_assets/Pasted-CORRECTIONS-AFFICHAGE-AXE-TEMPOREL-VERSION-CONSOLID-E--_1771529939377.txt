@@ -1,0 +1,147 @@
+CORRECTIONS AFFICHAGE AXE TEMPOREL - VERSION CONSOLIDÉE
+
+═══════════════════════════════════════════════════════════════
+
+1. BACKEND : PÉRIODE "24H" = 24H AVANT MAINTENANT
+
+Dans /api/power-chart-data :
+- Si period="24h" et pas de end_date spécifié → end_datetime = NOW()
+- PAS end_datetime = dernière mesure en base
+- start_time = end_datetime - 24h
+
+2. BACKEND : AGRÉGATION SQL AVEC INTERVALLES ALIGNÉS
+
+OBJECTIF : Points de données alignés sur des intervalles nets (00:00, 00:05, 00:10... et PAS 00:02, 00:07...)
+
+IMPLÉMENTATION par période :
+
+**24h** : Agrégation par 5 minutes
+```sql
+DATE_TRUNC('hour', timestamp) + 
+INTERVAL '5 minutes' * FLOOR(EXTRACT(MINUTE FROM timestamp) / 5) AS time_bucket
+Résultat : 288 points alignés (00:00, 00:05, 00:10, 00:15...)
+7 jours : Agrégation par 1 heure
+DATE_TRUNC('hour', timestamp) AS time_bucket
+Résultat : 168 points alignés (00:00, 01:00, 02:00...)
+30 jours : Agrégation par 6 heures
+DATE_TRUNC('hour', timestamp) + 
+INTERVAL '6 hours' * FLOOR(EXTRACT(HOUR FROM timestamp) / 6) AS time_bucket
+Résultat : 120 points alignés (00:00, 06:00, 12:00, 18:00...)
+FRONTEND : CONFIGURATION CHART.JS
+GÉNÉRAL :
+ENLEVER round: 'hour' (laisser les timestamps bruts alignés par SQL)
+Activer autoSkip pour éviter surcharge de labels
+VUE 24H :
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'hour',
+            displayFormats: {
+                hour: 'HH:mm'
+            }
+        },
+        ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12,  // Affiche ~12 labels max (ex: toutes les 2h)
+            callback: function(value, index, ticks) {
+                const date = new Date(value);
+                const prevDate = index > 0 ? new Date(ticks[index - 1].value) : null;
+                
+                // Afficher date au premier label et aux changements de jour
+                if (index === 0 || (prevDate && date.getDate() !== prevDate.getDate())) {
+                    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                           date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                }
+                
+                return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            }
+        }
+    }
+}
+Résultat visuel axe X (exemple pour 24h couvrant 18/02-19/02) :
+18/02 20:00    22:00    19/02 00:00    02:00    04:00    ...    18:00
+VUE 7 JOURS :
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'hour',
+            displayFormats: {
+                hour: 'dd/MM HH:mm'  // Date + heure, PAS juste date
+            }
+        },
+        ticks: {
+            autoSkip: true,
+            maxTicksLimit: 14  // ~14 labels pour 7 jours (toutes les 12h)
+        }
+    }
+}
+Résultat visuel axe X :
+13/02 00:00    13/02 12:00    14/02 00:00    14/02 12:00    ...
+VUE 30 JOURS :
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'day',
+            displayFormats: {
+                day: 'dd/MM'
+            }
+        },
+        ticks: {
+            autoSkip: true,
+            maxTicksLimit: 15  // Tous les 2 jours environ
+        }
+    }
+}
+Résultat visuel axe X :
+20/01    22/01    24/01    26/01    ...    18/02
+DIFFÉRENCE POINTS vs LABELS
+IMPORTANT : Distinguer deux choses :
+POINTS DE DONNÉES (résolution du graphique) :
+24h : 288 points (tous les 5 min)
+7j : 168 points (toutes les heures)
+30j : 120 points (toutes les 6h)
+LABELS AXE X (affichage visible) :
+Chart.js affiche seulement ~12-15 labels bien espacés
+autoSkip + maxTicksLimit gèrent ça automatiquement
+Les 288 points sont DANS le graphique (courbe détaillée)
+L'axe X montre seulement un sous-ensemble lisible
+RÉSULTAT :
+Graphique précis avec tous les points
+Axe X propre et lisible
+Tooltip au hover montre l'heure exacte (ex: 05:15)
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+Vue 24h à 14:30 :
+Données : de 13/02 14:00 à 14/02 14:00 (vraiment 24h avant maintenant)
+Axe X : ~12 labels espacés (ex: 14:00, 16:00, 18:00... 12:00, 14:00)
+Date affichée au début et à chaque changement de jour (minuit)
+Points : tous les 5 minutes (alignés : 14:00, 14:05, 14:10...)
+Vue 7 jours :
+Axe X : date + heure (13/02 00:00, 13/02 12:00...)
+PAS juste dates
+Points : toutes les heures (00:00, 01:00, 02:00...)
+Vue 30 jours :
+Axe X : dates seulement (20/01, 22/01...)
+Points : toutes les 6h (00:00, 06:00, 12:00, 18:00)
+Hover sur graphique :
+Tooltip affiche heure exacte du point
+Ex: "19/02/2026 05:15 - PR1 (W): 428.8"
+═══════════════════════════════════════════════════════════════
+RÉSUMÉ DES CHANGEMENTS
+BACKEND :
+end_datetime = NOW() pour période 24h (pas dernière mesure)
+Agrégation SQL avec intervalles alignés (DATE_TRUNC + FLOOR)
+24h = 5min, 7j = 1h, 30j = 6h
+FRONTEND :
+Vue 7j affiche date + heure (dd/MM HH:mm)
+autoSkip + maxTicksLimit pour labels lisibles
+Callback custom pour afficher date au changement de jour (vue 24h)
+PAS de round: 'hour' (timestamps alignés par SQL suffisent)
+RÉSULTAT :
+Axe X propre avec intervalles nets
+Date visible seulement quand nécessaire (vue 24h)
+Graphiques précis avec tous les détails
+Affichage lisible avec labels espacés
