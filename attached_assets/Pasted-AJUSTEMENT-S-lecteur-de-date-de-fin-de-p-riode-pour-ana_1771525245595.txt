@@ -1,0 +1,142 @@
+AJUSTEMENT : Sélecteur de date de fin de période pour analyse historique
+
+OBJECTIF : Permettre d'analyser l'activité des pompes sur n'importe quelle période passée, pas seulement les "derniers X jours jusqu'à maintenant".
+
+═══════════════════════════════════════════════════════════════
+
+FONCTIONNALITÉ
+
+Ajouter un sélecteur de date "Jusqu'au" qui définit la fin de la période à afficher.
+
+EXEMPLES D'USAGE :
+- Période "7 jours" + date de fin "12/12/2025" → affiche du 05/12/2025 au 12/12/2025
+- Période "24h" + date de fin "01/02/2026" → affiche du 31/01/2026 23:00 au 01/02/2026 23:00
+- Par défaut : date de fin = aujourd'hui (comportement actuel conservé)
+
+═══════════════════════════════════════════════════════════════
+
+INTERFACE UTILISATEUR
+
+1. AJOUTER un date picker dans la section des contrôles du graphique
+   - Label : "Jusqu'au :"
+   - Input type="date" 
+   - Valeur par défaut : date du jour
+   - Bouton "↻" pour réinitialiser à aujourd'hui
+
+2. ORGANISATION des contrôles :
+   - Date picker à gauche
+   - Boutons période (24h/7j/30j) au milieu
+   - Bouton export PNG à droite
+
+3. TITRE DU GRAPHIQUE dynamique :
+   - Afficher la plage exacte : "💧 Activité de la pompe (05/12/2025 - 12/12/2025)"
+   - Se met à jour automatiquement selon date + période sélectionnées
+
+═══════════════════════════════════════════════════════════════
+
+LOGIQUE BACKEND
+
+1. MODIFIER l'endpoint /api/power-chart-data :
+   - Ajouter paramètre optionnel : end_date (format YYYY-MM-DD)
+   - Si end_date fourni : utiliser cette date comme fin de période (à 23:59:59)
+   - Si end_date absent : utiliser maintenant (comportement actuel)
+   - Calculer start_date = end_date - période (24h/7d/30d)
+
+2. REQUÊTE SQL modifiée :
+   - Filtrer : timestamp >= start_date AND timestamp <= end_date
+   - Reste identique (agrégation, grouping, etc.)
+
+═══════════════════════════════════════════════════════════════
+
+LOGIQUE FRONTEND
+
+1. INITIALISATION :
+   - Au chargement de la page : pré-remplir le date picker avec la date du jour
+   - Afficher le graphique avec les données par défaut (jusqu'à aujourd'hui)
+
+2. ÉVÉNEMENTS :
+   - Changement de date → recharger les données du graphique avec la nouvelle end_date
+   - Clic sur bouton reset → remettre date = aujourd'hui et recharger
+   - Changement de période (24h/7j/30j) → recharger avec la date actuellement sélectionnée
+
+3. APPEL API :
+   - Inclure le paramètre end_date dans l'URL si une date est sélectionnée
+   - Format : /api/power-chart-data?device_id=X&period=7d&end_date=2025-12-12
+
+4. MISE À JOUR DU TITRE :
+   - Calculer start_date = end_date - période
+   - Formater en français : "05/12/2025 - 12/12/2025"
+   - Mettre à jour après chaque chargement de données
+
+═══════════════════════════════════════════════════════════════
+
+VALIDATIONS
+
+1. CÔTÉ FRONTEND :
+   - Bloquer sélection de date future (date > aujourd'hui)
+   - Si date future détectée : alert + reset à aujourd'hui
+   - Date maximale du date picker = aujourd'hui
+
+2. CÔTÉ BACKEND :
+   - Valider format de end_date (YYYY-MM-DD)
+   - Retourner erreur 400 si format invalide
+   - Si aucune donnée dans la période : retourner tableau vide (pas d'erreur)
+
+═══════════════════════════════════════════════════════════════
+
+COMPORTEMENTS ATTENDUS
+
+1. PAR DÉFAUT (première visite) :
+   - Date picker = aujourd'hui
+   - Période = 24h (déjà actif)
+   - Graphique = dernières 24h jusqu'à maintenant
+
+2. SÉLECTION DATE PASSÉE :
+   - User clique sur date picker et choisit "10/02/2026"
+   - User a "7 jours" sélectionné
+   - Graphique affiche : 03/02/2026 - 10/02/2026
+   - Titre mis à jour avec ces dates
+
+3. CHANGEMENT DE PÉRIODE :
+   - Date = "10/02/2026", période = "7 jours"
+   - User clique sur "30 jours"
+   - Graphique affiche : 11/01/2026 - 10/02/2026
+   - Titre mis à jour
+
+4. BOUTON RESET :
+   - User a exploré l'historique (date = "15/01/2026")
+   - User clique sur "↻"
+   - Date picker revient à aujourd'hui
+   - Graphique recharge avec données actuelles
+
+═══════════════════════════════════════════════════════════════
+
+STYLE VISUEL
+
+- Date picker : style cohérent avec les boutons de période
+- Fond gris clair (#f8f9fa) autour du date picker
+- Bordure verte (#2d5a3d) au focus
+- Bouton reset : simple, icône ↻, hover = fond gris
+- Responsive : sur mobile, date picker prend toute la largeur au-dessus des boutons
+
+═══════════════════════════════════════════════════════════════
+
+TESTS À EFFECTUER
+
+1. Date par défaut = aujourd'hui → graphique fonctionne
+2. Sélection date passée (ex: 01/01/2026) → affiche historique correct
+3. Changement période avec date passée → recalcule correctement start_date
+4. Bouton reset → revient à aujourd'hui et recharge
+5. Tentative date future → bloquée avec message d'erreur
+6. Titre graphique → affiche la bonne plage de dates en français
+7. Responsive mobile → date picker reste utilisable
+
+═══════════════════════════════════════════════════════════════
+
+MISE À JOUR DOCUMENTATION
+
+Ajouter dans replit.md :
+- Feature : Sélecteur de date de fin pour analyse historique
+- API : Paramètre end_date optionnel dans /api/power-chart-data
+- UX : Bouton reset pour revenir à la vue actuelle
+- Validation : Blocage des dates futures
