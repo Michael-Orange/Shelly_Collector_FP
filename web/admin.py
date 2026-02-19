@@ -295,6 +295,14 @@ def render_admin() -> str:
                     }
                 }
 
+                var openPanels = document.querySelectorAll('[id^="vh-"]');
+                openPanels.forEach(function(p) {
+                    if (p.style.display !== 'none') {
+                        p.style.display = 'none';
+                        p.innerHTML = '';
+                    }
+                });
+
                 if (configErrors.length > 0) {
                     showMsg('success', 'Device enregistr\\u00e9, mais erreur config versioning pour: ' + configErrors.join(', '));
                 } else {

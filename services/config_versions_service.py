@@ -49,7 +49,7 @@ async def get_config_history(
                    effective_from, effective_to, created_at, version
             FROM device_config_versions
             WHERE device_id = $1 AND channel = $2
-            ORDER BY effective_from DESC, version DESC
+            ORDER BY (effective_to IS NULL) DESC, effective_from DESC, version DESC
         """, device_id, channel)
         return [dict(row) for row in rows]
 
