@@ -1,0 +1,684 @@
+PHASE 2B : TESTS UNITAIRES - PROTECTION DE LA LOGIQUE MÉTIER CRITIQUE
+
+OBJECTIF : Créer des tests automatisés pour sécuriser les calculs critiques (détection cycles, volumes, CO2e) et éviter les régressions lors de futures modifications.
+
+CONTEXTE :
+L'application calcule des données critiques :
+- Détection de cycles de pompage (logique complexe)
+- Calculs de volumes pompés (business)
+- Calculs d'émissions CO2e (potentiellement réglementaire)
+
+Sans tests, une modification future peut casser ces calculs sans qu'on s'en aperçoive avant qu'un client le signale.
+
+═══════════════════════════════════════════════════════════════
+
+FRAMEWORK DE TEST : PYTEST
+
+Utiliser pytest (simple, standard Python)
+
+Installation :
+```bash
+pip install pytest pytest-asyncio
+Ajouter dans requirements.txt ou pyproject.toml :
+pytest
+pytest-asyncio
+═══════════════════════════════════════════════════════════════
+STRUCTURE DES TESTS
+Créer cette arborescence :
+/tests/
+init.py
+test_cycle_detector.py       # Tests détection cycles
+test_volume_calculator.py    # Tests calculs volumes
+test_co2e_calculator.py      # Tests calculs CO2e
+test_config_versions.py      # Tests système versioning (optionnel)
+fixtures.py                  # Données de test réutilisables
+═══════════════════════════════════════════════════════════════
+PARTIE 1 : FIXTURES (DONNÉES DE TEST)
+Créer tests/fixtures.py :
+"""
+Données de test réutilisables pour tous les tests
+"""
+from datetime import datetime, timezone, timedelta
+
+def sample_power_logs_single_cycle():
+    """
+    Génère des logs pour un cycle simple :
+    - Démarrage à 10:00
+    - Arrêt à 10:15 (15 minutes)
+    - Puissance moyenne 1200W
+    """
+    start_time = datetime(2026, 2, 15, 10, 0, 0, tzinfo=timezone.utc)
+    
+    logs = []
+    for i in range(15):  # 15 minutes
+        timestamp = start_time + timedelta(minutes=i)
+        logs.append({
+            'timestamp': timestamp,
+            'device_id': 'test_device',
+            'channel': 'PR 1',
+            'apower_w': 1200.0,
+            'current_a': 5.0
+        })
+    
+    return logs
+
+def sample_power_logs_two_cycles():
+    """
+    2 cycles :
+    - Cycle 1 : 10:00-10:10 (10 min, 1200W)
+    - Gap : 10:10-10:15 (5 min OFF)
+    - Cycle 2 : 10:15-10:25 (10 min, 1500W)
+    """
+    logs = []
+    start_time = datetime(2026, 2, 15, 10, 0, 0, tzinfo=timezone.utc)
+    
+    # Cycle 1
+    for i in range(10):
+        logs.append({
+            'timestamp': start_time + timedelta(minutes=i),
+            'device_id': 'test_device',
+            'channel': 'PR 1',
+            'apower_w': 1200.0,
+            'current_a': 5.0
+        })
+    
+    # Cycle 2 (après gap de 5 min)
+    for i in range(10):
+        logs.append({
+            'timestamp': start_time + timedelta(minutes=15 + i),
+            'device_id': 'test_device',
+            'channel': 'PR 1',
+            'apower_w': 1500.0,
+            'current_a': 6.5
+        })
+    
+    return logs
+
+def sample_power_logs_short_cycle():
+    """
+    Cycle très court : 2 minutes seulement
+    Test edge case : doit être détecté
+    """
+    start_time = datetime(2026, 2, 15, 14, 30, 0, tzinfo=timezone.utc)
+    
+    logs = []
+    for i in range(2):
+        logs.append({
+            'timestamp': start_time + timedelta(minutes=i),
+            'device_id': 'test_device',
+            'channel': 'PR 2',
+            'apower_w': 800.0,
+            'current_a': 3.5
+        })
+    
+    return logs
+
+def sample_power_logs_no_cycle():
+    """
+    Pas de cycle : puissance toujours < seuil
+    """
+    start_time = datetime(2026, 2, 15, 16, 0, 0, tzinfo=timezone.utc)
+    
+    logs = []
+    for i in range(20):
+        logs.append({
+            'timestamp': start_time + timedelta(minutes=i),
+            'device_id': 'test_device',
+            'channel': 'PS',
+            'apower_w': 50.0,  # En dessous du seuil (généralement 100W)
+            'current_a': 0.2
+        })
+    
+    return logs
+
+def sample_pump_config():
+    """
+    Configuration de pompe pour tests de calcul de volume
+    """
+    return {
+        'device_id': 'test_device',
+        'channel': 'PR 1',
+        'debit_m3_h': 6.0,  # 6 m³/h
+        'pump_model': 'Test Model',
+        'effective_from': datetime(2026, 1, 1, tzinfo=timezone.utc)
+    }
+
+def sample_co2e_config():
+    """
+    Coefficients CO2e pour tests
+    """
+    return {
+        'bo_factor': 0.6,
+        'mcf_fosse': 0.5,
+        'mcf_fpv': 0.03,
+        'gwp_ch4': 28,
+        'carbon_intensity_kwh': 0.052  # kg CO2e/kWh (France)
+    }
+═══════════════════════════════════════════════════════════════
+PARTIE 2 : TESTS DÉTECTION DE CYCLES
+Créer tests/test_cycle_detector.py :
+"""
+Tests pour la détection des cycles de pompage
+"""
+import pytest
+from datetime import datetime, timezone, timedelta
+from tests.fixtures import (
+    sample_power_logs_single_cycle,
+    sample_power_logs_two_cycles,
+    sample_power_logs_short_cycle,
+    sample_power_logs_no_cycle
+)
+
+# Importer la fonction à tester
+# NOTE : Adapter le chemin selon votre structure
+# Si la fonction est dans api/routes.py, il faut peut-être la déplacer
+# dans un module dédié comme services/cycle_detector.py
+from services.cycle_detector import detect_cycles
+
+class TestCycleDetection:
+    """Tests de détection de cycles"""
+    
+    def test_single_cycle_detected(self):
+        """
+        Test : Un seul cycle doit être détecté
+        Données : Pompe ON 15 minutes
+        Attendu : 1 cycle de 15 minutes
+        """
+        logs = sample_power_logs_single_cycle()
+        
+        cycles = detect_cycles(
+            logs,
+            min_power_threshold=100,  # W
+            min_gap_minutes=3
+        )
+        
+        assert len(cycles) == 1, f"Attendu 1 cycle, trouvé {len(cycles)}"
+        
+        cycle = cycles[0]
+        assert cycle['duration_minutes'] == 15
+        assert cycle['channel'] == 'PR 1'
+        assert 1100 <= cycle['avg_power_w'] <= 1300  # ~1200W ±100
+    
+    def test_two_cycles_detected(self):
+        """
+        Test : Deux cycles séparés doivent être détectés
+        Données : 2 cycles avec gap de 5 min
+        Attendu : 2 cycles distincts
+        """
+        logs = sample_power_logs_two_cycles()
+        
+        cycles = detect_cycles(
+            logs,
+            min_power_threshold=100,
+            min_gap_minutes=3
+        )
+        
+        assert len(cycles) == 2, f"Attendu 2 cycles, trouvé {len(cycles)}"
+        
+        # Vérifier cycle 1
+        assert cycles[0]['duration_minutes'] == 10
+        assert 1100 <= cycles[0]['avg_power_w'] <= 1300
+        
+        # Vérifier cycle 2
+        assert cycles[1]['duration_minutes'] == 10
+        assert 1400 <= cycles[1]['avg_power_w'] <= 1600
+    
+    def test_short_cycle_detected(self):
+        """
+        Test : Un cycle court (2 min) doit être détecté
+        Edge case important
+        """
+        logs = sample_power_logs_short_cycle()
+        
+        cycles = detect_cycles(
+            logs,
+            min_power_threshold=100,
+            min_gap_minutes=3
+        )
+        
+        assert len(cycles) == 1
+        assert cycles[0]['duration_minutes'] == 2
+    
+    def test_no_cycle_below_threshold(self):
+        """
+        Test : Pas de cycle si puissance < seuil
+        Données : Puissance toujours à 50W (< 100W seuil)
+        Attendu : 0 cycles
+        """
+        logs = sample_power_logs_no_cycle()
+        
+        cycles = detect_cycles(
+            logs,
+            min_power_threshold=100,
+            min_gap_minutes=3
+        )
+        
+        assert len(cycles) == 0, f"Attendu 0 cycles, trouvé {len(cycles)}"
+    
+    def test_empty_logs(self):
+        """
+        Test : Pas de crash avec données vides
+        Edge case : robustesse
+        """
+        cycles = detect_cycles(
+            [],
+            min_power_threshold=100,
+            min_gap_minutes=3
+        )
+        
+        assert len(cycles) == 0
+    
+    def test_cycle_timestamps_order(self):
+        """
+        Test : start_time < end_time pour chaque cycle
+        Vérification cohérence temporelle
+        """
+        logs = sample_power_logs_two_cycles()
+        
+        cycles = detect_cycles(logs, 100, 3)
+        
+        for cycle in cycles:
+            start = datetime.fromisoformat(cycle['start_time'])
+            end = datetime.fromisoformat(cycle['end_time'])
+            assert start < end, "start_time doit être avant end_time"
+═══════════════════════════════════════════════════════════════
+PARTIE 3 : TESTS CALCULS DE VOLUMES
+Créer tests/test_volume_calculator.py :
+"""
+Tests pour les calculs de volumes pompés
+"""
+import pytest
+from tests.fixtures import sample_pump_config
+
+# Fonction à tester (à créer/extraire)
+from services.volume_calculator import calculate_volume_m3
+
+class TestVolumeCalculator:
+    """Tests de calcul de volumes"""
+    
+    def test_volume_simple_case(self):
+        """
+        Test : Calcul volume standard
+        Config : Débit 6 m³/h
+        Cycle : 10 minutes
+        Attendu : 1.0 m³
+        """
+        config = sample_pump_config()
+        duration_minutes = 10
+        
+        volume = calculate_volume_m3(
+            debit_m3_h=config['debit_m3_h'],
+            duration_minutes=duration_minutes
+        )
+        
+        expected = 6.0 * (10 / 60)  # 1.0 m³
+        assert abs(volume - expected) < 0.01, f"Attendu {expected} m³, calculé {volume} m³"
+    
+    def test_volume_15_minutes(self):
+        """
+        Test : 15 minutes de pompage
+        Attendu : 1.5 m³
+        """
+        volume = calculate_volume_m3(
+            debit_m3_h=6.0,
+            duration_minutes=15
+        )
+        
+        expected = 1.5
+        assert abs(volume - expected) < 0.01
+    
+    def test_volume_one_hour(self):
+        """
+        Test : Pompage d'une heure = débit exact
+        """
+        volume = calculate_volume_m3(
+            debit_m3_h=6.0,
+            duration_minutes=60
+        )
+        
+        assert abs(volume - 6.0) < 0.01
+    
+    def test_volume_different_debit(self):
+        """
+        Test : Débit différent (8 m³/h)
+        """
+        volume = calculate_volume_m3(
+            debit_m3_h=8.0,
+            duration_minutes=30
+        )
+        
+        expected = 8.0 * 0.5  # 4.0 m³
+        assert abs(volume - expected) < 0.01
+    
+    def test_volume_zero_duration(self):
+        """
+        Test : Durée = 0 → volume = 0
+        Edge case
+        """
+        volume = calculate_volume_m3(
+            debit_m3_h=6.0,
+            duration_minutes=0
+        )
+        
+        assert volume == 0.0
+    
+    def test_volume_negative_duration_raises_error(self):
+        """
+        Test : Durée négative doit lever une erreur
+        Validation des inputs
+        """
+        with pytest.raises(ValueError):
+            calculate_volume_m3(
+                debit_m3_h=6.0,
+                duration_minutes=-10
+            )
+    
+    def test_volume_precision(self):
+        """
+        Test : Précision à 2 décimales minimum
+        """
+        volume = calculate_volume_m3(
+            debit_m3_h=5.5,
+            duration_minutes=7
+        )
+        
+        expected = 5.5 * (7 / 60)  # 0.641666...
+        assert abs(volume - expected) < 0.001  # Précision 3 décimales
+═══════════════════════════════════════════════════════════════
+PARTIE 4 : TESTS CALCULS CO2e
+Créer tests/test_co2e_calculator.py :
+"""
+Tests pour les calculs d'émissions CO2e
+"""
+import pytest
+from tests.fixtures import sample_co2e_config
+
+# Fonction à tester
+from services.co2e_calculator import calculate_co2e_kg
+
+class TestCO2eCalculator:
+    """Tests de calcul CO2e"""
+    
+    def test_co2e_base_calculation(self):
+        """
+        Test : Calcul CO2e de référence
+        Volume : 1 m³
+        Config : Coefficients standards
+        Attendu : 0.384 kg CO2e (valeur de référence calculée manuellement)
+        """
+        config = sample_co2e_config()
+        
+        co2e = calculate_co2e_kg(
+            volume_m3=1.0,
+            bo_factor=config['bo_factor'],
+            mcf_fosse=config['mcf_fosse'],
+            mcf_fpv=config['mcf_fpv'],
+            gwp_ch4=config['gwp_ch4']
+        )
+        
+        # Calcul manuel de référence :
+        # CH4_fosse = 1 * 0.6 * 0.5 = 0.3 kg CH4
+        # CH4_fpv = 1 * 0.6 * 0.03 = 0.018 kg CH4
+        # Total CH4 = 0.318 kg
+        # CO2e = 0.318 * 28 = 8.904 kg... 
+        # NOTE : Vérifier la formule exacte dans ton code actuel
+        
+        # Tolérance de 5% pour tenir compte des arrondis
+        expected = 0.384  # À AJUSTER selon ta formule réelle
+        assert abs(co2e - expected) < expected * 0.05
+    
+    def test_co2e_zero_volume(self):
+        """
+        Test : Volume = 0 → CO2e = 0
+        """
+        config = sample_co2e_config()
+        
+        co2e = calculate_co2e_kg(
+            volume_m3=0.0,
+            bo_factor=config['bo_factor'],
+            mcf_fosse=config['mcf_fosse'],
+            mcf_fpv=config['mcf_fpv'],
+            gwp_ch4=config['gwp_ch4']
+        )
+        
+        assert co2e == 0.0
+    
+    def test_co2e_large_volume(self):
+        """
+        Test : Grand volume (100 m³)
+        Vérifier linéarité
+        """
+        config = sample_co2e_config()
+        
+        co2e_1m3 = calculate_co2e_kg(1.0, **config)
+        co2e_100m3 = calculate_co2e_kg(100.0, **config)
+        
+        # CO2e doit être linéaire avec le volume
+        expected_100m3 = co2e_1m3 * 100
+        assert abs(co2e_100m3 - expected_100m3) < 0.01
+    
+    def test_co2e_different_gwp(self):
+        """
+    Test : Changement du GWP CH4 (AR6 = 29.8 au lieu de AR5 = 28)
+        Impact sur le résultat
+        """
+        config = sample_co2e_config()
+        
+        co2e_ar5 = calculate_co2e_kg(1.0, **{**config, 'gwp_ch4': 28})
+        co2e_ar6 = calculate_co2e_kg(1.0, **{**config, 'gwp_ch4': 29.8})
+        
+        # AR6 doit donner un résultat ~6.4% plus élevé
+        ratio = co2e_ar6 / co2e_ar5
+        assert 1.06 < ratio < 1.07, f"Ratio GWP incorrect: {ratio}"
+    
+    def test_co2e_mcf_impact(self):
+        """
+        Test : Impact du MCF (fosse vs FPV)
+        MCF fosse (0.5) > MCF FPV (0.03)
+        """
+        config = sample_co2e_config()
+        
+        co2e_fosse = calculate_co2e_kg(
+            volume_m3=1.0,
+            bo_factor=config['bo_factor'],
+            mcf_fosse=config['mcf_fosse'],
+            mcf_fpv=0.0,  # Pas de FPV
+            gwp_ch4=config['gwp_ch4']
+        )
+        
+        co2e_fpv = calculate_co2e_kg(
+            volume_m3=1.0,
+            bo_factor=config['bo_factor'],
+            mcf_fosse=0.0,  # Pas de fosse
+            mcf_fpv=config['mcf_fpv'],
+            gwp_ch4=config['gwp_ch4']
+        )
+        
+        # Fosse doit émettre beaucoup plus que FPV
+        assert co2e_fosse > co2e_fpv * 10
+═══════════════════════════════════════════════════════════════
+PARTIE 5 : REFACTORISATION NÉCESSAIRE
+PROBLÈME : Les fonctions testées sont actuellement dans api/routes.py (pas testables facilement).
+SOLUTION : Extraire la logique dans services/.
+Créer services/cycle_detector.py :
+"""
+Service de détection des cycles de pompage
+Extrait de api/routes.py pour être testable
+"""
+from typing import List, Dict, Any
+from datetime import datetime
+
+def detect_cycles(
+    power_logs: List[Dict[str, Any]],
+    min_power_threshold: float = 100.0,
+    min_gap_minutes: int = 3
+) -> List[Dict[str, Any]]:
+    """
+    Détecte les cycles de pompage à partir des logs de puissance.
+    
+    Args:
+        power_logs: Liste de dicts avec timestamp, apower_w, current_a, channel
+        min_power_threshold: Seuil de puissance pour considérer pompe active (W)
+        min_gap_minutes: Gap minimum entre 2 cycles (minutes)
+    
+    Returns:
+        Liste de cycles détectés avec start_time, end_time, duration, avg_power, etc.
+    """
+    # CODE EXTRAIT DE api/routes.py (fonction detect_cycles existante)
+    # À DÉPLACER ICI
+    
+    cycles = []
+    
+    # ... logique de détection ...
+    
+    return cycles
+Créer services/volume_calculator.py :
+"""
+Calculs de volumes pompés
+"""
+
+def calculate_volume_m3(debit_m3_h: float, duration_minutes: int) -> float:
+    """
+    Calcule le volume pompé.
+    
+    Args:
+        debit_m3_h: Débit de la pompe (m³/h)
+        duration_minutes: Durée de pompage (minutes)
+    
+    Returns:
+        Volume pompé (m³)
+    
+    Raises:
+        ValueError: Si durée négative
+    """
+    if duration_minutes < 0:
+        raise ValueError("La durée ne peut pas être négative")
+    
+    if duration_minutes == 0:
+        return 0.0
+    
+    duration_hours = duration_minutes / 60.0
+    volume = debit_m3_h * duration_hours
+    
+    return round(volume, 3)
+Créer services/co2e_calculator.py :
+"""
+Calculs d'émissions CO2e liées au méthane
+"""
+
+def calculate_co2e_kg(
+    volume_m3: float,
+    bo_factor: float = 0.6,
+    mcf_fosse: float = 0.5,
+    mcf_fpv: float = 0.03,
+    gwp_ch4: int = 28
+) -> float:
+    """
+    Calcule les émissions CO2e liées au pompage.
+    
+    Méthodologie GIEC :
+    CH4_produit = Volume * BO_factor * (MCF_fosse + MCF_fpv)
+    CO2e = CH4_produit * GWP_CH4
+    
+    Args:
+        volume_m3: Volume pompé (m³)
+        bo_factor: Facteur de potentiel biologique (0.6 typique)
+        mcf_fosse: Facteur de conversion méthane fosse (0.5)
+        mcf_fpv: Facteur de conversion méthane FPV (0.03)
+        gwp_ch4: Potentiel de réchauffement global CH4 (28 pour AR5)
+    
+    Returns:
+        Émissions CO2e (kg)
+    """
+    if volume_m3 <= 0:
+        return 0.0
+    
+    # Calculer CH4 produit (kg)
+    ch4_fosse = volume_m3 * bo_factor * mcf_fosse
+    ch4_fpv = volume_m3 * bo_factor * mcf_fpv
+    ch4_total = ch4_fosse + ch4_fpv
+    
+    # Convertir en CO2e
+    co2e = ch4_total * gwp_ch4
+    
+    return round(co2e, 3)
+PUIS dans api/routes.py :
+from services.cycle_detector import detect_cycles
+from services.volume_calculator import calculate_volume_m3
+from services.co2e_calculator import calculate_co2e_kg
+
+# Utiliser ces fonctions au lieu du code inline
+═══════════════════════════════════════════════════════════════
+PARTIE 6 : EXÉCUTION DES TESTS
+Créer un fichier pytest.ini à la racine :
+[pytest]
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = -v --tb=short
+Commande pour lancer les tests :
+pytest
+Ou pour un fichier spécifique :
+pytest tests/test_cycle_detector.py
+Ou avec couverture de code :
+pip install pytest-cov
+pytest --cov=services --cov-report=html
+═══════════════════════════════════════════════════════════════
+PARTIE 7 : INTÉGRATION CI/CD (OPTIONNEL)
+Créer .github/workflows/tests.yml (si GitHub) :
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+    
+    - name: Run tests
+      run: pytest
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER (VALIDATION)
+INSTALLATION :
+pip install pytest pytest-asyncio
+pytest --version fonctionne
+EXÉCUTION :
+pytest → tous les tests passent
+0 échecs
+COUVERTURE :
+pytest --cov → couverture > 80% pour services/
+EDGE CASES :
+Tests avec données vides passent
+Tests avec durée = 0 passent
+Tests avec valeurs négatives lèvent erreurs
+RÉGRESSION :
+Modifier volontairement un calcul → test échoue
+Revenir en arrière → test passe
+═══════════════════════════════════════════════════════════════
+ORDRE D'IMPLÉMENTATION
+Installer pytest
+Créer structure /tests/
+Créer fixtures.py
+Extraire logique dans services/ (cycle_detector, volume_calculator, co2e_calculator)
+Adapter api/routes.py pour utiliser les services
+Créer test_cycle_detector.py
+Créer test_volume_calculator.py
+Créer test_co2e_calculator.py
+Lancer pytest et corriger jusqu'à ce que tout passe
+Documenter dans replit.md
+DURÉE ESTIMÉE : 3-4 heures
+PRIORITÉ : 🟡 HAUTE (sécurité avant clients)
+VALEUR : Protection contre régressions + confiance déploiement
