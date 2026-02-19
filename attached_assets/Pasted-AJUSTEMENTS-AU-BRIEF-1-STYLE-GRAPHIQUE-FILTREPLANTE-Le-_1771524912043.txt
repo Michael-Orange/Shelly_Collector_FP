@@ -1,0 +1,206 @@
+AJUSTEMENTS AU BRIEF :
+
+1. STYLE GRAPHIQUE FILTREPLANTE
+Le graphique doit suivre la charte visuelle de Filtreplante.com et du dashboard actuel.
+
+Palette de couleurs (thème phytoépuration / nature / eau) :
+- Principal : #2d5a3d (vert foncé Filtreplante)
+- Secondaire : #4a9d6f (vert moyen)
+- Tertiaire : #3498db (bleu eau)
+- Quaternaire : #27ae60 (vert clair)
+
+Modifier les couleurs dans updateChart() :
+
+const colors = [
+    { border: '#2d5a3d', bg: 'rgba(45, 90, 61, 0.1)' },      // Vert Filtreplante
+    { border: '#4a9d6f', bg: 'rgba(74, 157, 111, 0.1)' },    // Vert moyen
+    { border: '#3498db', bg: 'rgba(52, 152, 219, 0.1)' },    // Bleu eau
+    { border: '#27ae60', bg: 'rgba(39, 174, 96, 0.1)' }      // Vert clair
+];
+
+Style des boutons de période (harmoniser avec le dashboard) :
+
+.period-btn {
+    padding: 8px 16px;
+    border: 2px solid #2d5a3d;  /* Vert Filtreplante au lieu de bleu */
+    background: white;
+    color: #2d5a3d;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.period-btn:hover {
+    background: #f0f7f3;  /* Vert très clair */
+}
+
+.period-btn.active {
+    background: #2d5a3d;
+    color: white;
+}
+
+Police et style général : Utilise les mêmes polices et espacements que le reste du dashboard.
+
+2. GESTION DES ZÉROS (pompe arrêtée)
+
+Comportement souhaité :
+- Quand pas de données = trou dans la courbe (pas de ligne)
+- Après la dernière mesure = ajouter un point à 0 pour montrer l'arrêt
+
+Modifier l'endpoint API pour ajouter un point à 0 après la dernière mesure :
+
+# Dans /api/power-chart-data, après la boucle de formatage :
+
+for ch, data in data_by_channel.items():
+    if data['timestamps']:
+        # Ajouter un point à 0 après la dernière mesure (pour fermer visuellement)
+        last_time = datetime.fromisoformat(data['timestamps'][-1])
+        zero_time = last_time + timedelta(minutes=1)
+        
+        data['timestamps'].append(zero_time.isoformat())
+        data['power_w'].append(0)
+        data['current_a'].append(0)
+
+Modifier les options Chart.js pour gérer les gaps :
+
+options: {
+    // ... options existantes ...
+    datasets: {
+        line: {
+            spanGaps: false  // Ne pas connecter les trous = montrer les arrêts
+        }
+    }
+}
+
+3. EXPORT PNG
+
+Ajouter un bouton d'export dans les chart-controls :
+
+<div class="chart-controls">
+    <h3>📊 Activité de la pompe</h3>
+    <div class="controls-right">
+        <div class="period-selector">
+            <button class="period-btn active" data-period="24h">Dernières 24h</button>
+            <button class="period-btn" data-period="7d">7 derniers jours</button>
+            <button class="period-btn" data-period="30d">30 derniers jours</button>
+        </div>
+        <button id="exportChartBtn" class="btn-export">📥 Exporter PNG</button>
+    </div>
+</div>
+
+CSS pour le bouton export :
+
+.controls-right {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+}
+
+.btn-export {
+    padding: 8px 16px;
+    background: #2d5a3d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.btn-export:hover {
+    background: #234a30;
+}
+
+JavaScript pour l'export :
+
+document.getElementById('exportChartBtn')?.addEventListener('click', function() {
+    if (!powerChart) return;
+    
+    // Générer le nom du fichier avec device et date
+    const deviceId = document.getElementById('deviceFilter')?.value || 'device';
+    const date = new Date().toISOString().split('T')[0];
+    const filename = `filtreplante_${deviceId}_${currentPeriod}_${date}.png`;
+    
+    // Créer un lien de téléchargement
+    const url = powerChart.toBase64Image();
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = url;
+    link.click();
+});
+
+4. PÉRIODE PAR DÉFAUT 24h
+
+Modifier l'initialisation :
+
+let currentPeriod = '24h';  // Déjà OK
+
+Vérifier que le bouton "Dernières 24h" a bien la classe "active" au chargement (déjà dans le HTML).
+
+5. CONFIRMATION : PAS DE GRAPH SI PLUSIEURS DEVICES
+
+Logique déjà présente dans loadChartData() :
+
+if (!selectedDevice || selectedDevice === 'all') {
+    chartSection.style.display = 'none';
+    return;
+}
+
+C'est correct. Ne pas modifier.
+
+6. RESPONSIVE MOBILE (style Filtreplante)
+
+Ajuster les media queries pour correspondre au style du dashboard :
+
+@media (max-width: 768px) {
+    .chart-controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
+    
+    .controls-right {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .period-selector {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    
+    .period-btn {
+        flex: 1;
+        min-width: 100px;
+    }
+    
+    .btn-export {
+        width: 100%;
+    }
+    
+    .chart-container {
+        height: 300px;
+    }
+}
+
+7. TITRE ET ICÔNE
+
+Utiliser une icône cohérente avec le thème :
+
+<h3>💧 Activité de la pompe</h3>
+
+Ou si tu préfères :
+
+<h3>🔋 Activité électrique de la pompe</h3>
+
+RÉSUMÉ DES CHANGEMENTS PAR RAPPORT AU BRIEF INITIAL :
+- Palette verte/bleue thème Filtreplante (pas rouge/bleu générique)
+- Boutons verts au lieu de bleus
+- Point à 0 après dernière mesure
+- spanGaps: false pour montrer les trous
+- Bouton export PNG avec nom de fichier intelligent
+- Période 24h par défaut (déjà OK)
+- Confirmation : masquer si multiple devices
+
+Implémente ces ajustements et teste visuellement la cohérence avec le reste du dashboard.

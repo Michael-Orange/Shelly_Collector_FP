@@ -1,0 +1,509 @@
+OBJECTIF : Ajouter un graphique de visualisation des déclenchements de pompes sur le dashboard avec double axe Y (puissance + intensité).
+
+FONCTIONNALITÉ :
+- Graph temps réel des mesures électriques (kW et A)
+- Filtres temporels : 24h, 7 jours, 30 jours
+- Synchronisé avec les filtres device/canal existants du dashboard
+- Un graph par device (masqué si plusieurs devices sélectionnés ou aucun)
+
+═══════════════════════════════════════════════════════════════
+
+🌐 NOUVELLE API : Endpoint pour données graphique
+
+Ajouter dans api/routes.py :
+
+@router.get("/power-chart-data")
+async def get_power_chart_data(
+    request: Request,
+    device_id: str = Query(...),
+    channel: str = Query(None),  # Optionnel, si absent = tous les canaux
+    period: str = Query("24h", regex="^(24h|7d|30d)$")
+):
+    """
+    Retourne les données de puissance/intensité pour le graphique.
+    Agrégation : 1 point par minute pour 24h, 1 point par 10 min pour 7j, 1 point par heure pour 30j.
+    """
+    db_pool = request.app.state.db_pool
+    
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        
+        # Calculer la plage temporelle
+        now = datetime.now(pytz.UTC)
+        
+        if period == "24h":
+            start_time = now - timedelta(hours=24)
+            interval = "1 minute"
+        elif period == "7d":
+            start_time = now - timedelta(days=7)
+            interval = "10 minutes"
+        else:  # 30d
+            start_time = now - timedelta(days=30)
+            interval = "1 hour"
+        
+        # Construire la requête SQL avec agrégation temporelle
+        if channel:
+            channel_filter = "AND channel = $3"
+            params = [device_id, start_time, channel]
+        else:
+            channel_filter = ""
+            params = [device_id, start_time]
+        
+        query = f"""
+            SELECT 
+                date_trunc('{interval}', timestamp) as time_bucket,
+                channel,
+                AVG(apower_w) as avg_power_w,
+                AVG(current_a) as avg_current_a,
+                MAX(apower_w) as max_power_w,
+                MAX(current_a) as max_current_a
+            FROM power_logs
+            WHERE device_id = $1 
+              AND timestamp >= $2
+              {channel_filter}
+            GROUP BY time_bucket, channel
+            ORDER BY time_bucket ASC
+        """
+        
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+        
+        # Formater les données par canal
+        data_by_channel = {}
+        for row in rows:
+            ch = row['channel']
+            if ch not in data_by_channel:
+                data_by_channel[ch] = {
+                    'timestamps': [],
+                    'power_w': [],
+                    'current_a': []
+                }
+            
+            data_by_channel[ch]['timestamps'].append(row['time_bucket'].isoformat())
+            data_by_channel[ch]['power_w'].append(float(row['avg_power_w']) if row['avg_power_w'] else 0)
+            data_by_channel[ch]['current_a'].append(float(row['avg_current_a']) if row['avg_current_a'] else 0)
+        
+        return {
+            "device_id": device_id,
+            "period": period,
+            "data": data_by_channel
+        }
+    
+    except Exception as e:
+        print(f"❌ Error fetching chart data: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+═══════════════════════════════════════════════════════════════
+
+🎨 FRONTEND : Intégration Chart.js dans web/dashboard.py
+
+1. AJOUTER Chart.js dans le <head> du HTML :
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+2. AJOUTER le HTML du graphique AVANT le tableau des cycles :
+
+<div id="chart-section" style="display:none; margin-bottom: 30px;">
+    <div class="chart-controls">
+        <h3>📊 Activité de la pompe</h3>
+        <div class="period-selector">
+            <button class="period-btn active" data-period="24h">Dernières 24h</button>
+            <button class="period-btn" data-period="7d">7 derniers jours</button>
+            <button class="period-btn" data-period="30d">30 derniers jours</button>
+        </div>
+    </div>
+    <div class="chart-container">
+        <canvas id="powerChart"></canvas>
+    </div>
+</div>
+
+3. AJOUTER le CSS :
+
+<style>
+#chart-section {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.chart-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.chart-controls h3 {
+    margin: 0;
+    color: #2c3e50;
+}
+
+.period-selector {
+    display: flex;
+    gap: 10px;
+}
+
+.period-btn {
+    padding: 8px 16px;
+    border: 2px solid #3498db;
+    background: white;
+    color: #3498db;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+
+.period-btn:hover {
+    background: #ebf5fb;
+}
+
+.period-btn.active {
+    background: #3498db;
+    color: white;
+}
+
+.chart-container {
+    position: relative;
+    height: 400px;
+}
+
+@media (max-width: 768px) {
+    .chart-controls {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .chart-container {
+        height: 300px;
+    }
+}
+</style>
+
+4. AJOUTER le JavaScript (dans la section <script>) :
+
+let powerChart = null;
+let currentPeriod = '24h';
+
+// Initialiser le graphique
+function initChart() {
+    const ctx = document.getElementById('powerChart');
+    if (!ctx) return;
+    
+    powerChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: []
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        displayFormats: {
+                            hour: 'HH:mm',
+                            day: 'dd/MM',
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Temps'
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: 'Puissance (W)'
+                    },
+                    beginAtZero: true,
+                    grace: '10%'  // Ajoute 10% d'espace au-dessus du max
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    title: {
+                        display: true,
+                        text: 'Intensité (A)'
+                    },
+                    beginAtZero: true,
+                    grace: '10%',
+                    grid: {
+                        drawOnChartArea: false
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                const unit = context.dataset.yAxisID === 'y' ? 'W' : 'A';
+                                label += context.parsed.y.toFixed(2) + ' ' + unit;
+                            }
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Charger les données du graphique
+async function loadChartData() {
+    const deviceSelect = document.getElementById('deviceFilter');
+    const channelSelect = document.getElementById('channelFilter');
+    
+    const selectedDevice = deviceSelect?.value;
+    const selectedChannel = channelSelect?.value;
+    
+    // Conditions d'affichage du graphique
+    const chartSection = document.getElementById('chart-section');
+    
+    if (!selectedDevice || selectedDevice === 'all') {
+        chartSection.style.display = 'none';
+        return;
+    }
+    
+    chartSection.style.display = 'block';
+    
+    // Construire l'URL
+    let url = `/api/power-chart-data?device_id=${encodeURIComponent(selectedDevice)}&period=${currentPeriod}`;
+    if (selectedChannel && selectedChannel !== 'all') {
+        url += `&channel=${encodeURIComponent(selectedChannel)}`;
+    }
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            console.error('Erreur chargement données graphique');
+            return;
+        }
+        
+        const result = await response.json();
+        updateChart(result.data);
+    } catch (e) {
+        console.error('Erreur réseau graphique:', e);
+    }
+}
+
+// Mettre à jour le graphique avec les nouvelles données
+function updateChart(dataByChannel) {
+    if (!powerChart) {
+        initChart();
+    }
+    
+    const datasets = [];
+    const colors = [
+        { border: '#e74c3c', bg: 'rgba(231, 76, 60, 0.1)' },
+        { border: '#3498db', bg: 'rgba(52, 152, 219, 0.1)' },
+        { border: '#2ecc71', bg: 'rgba(46, 204, 113, 0.1)' },
+        { border: '#f39c12', bg: 'rgba(243, 156, 18, 0.1)' }
+    ];
+    
+    let colorIndex = 0;
+    
+    for (const [channel, data] of Object.entries(dataByChannel)) {
+        const color = colors[colorIndex % colors.length];
+        
+        // Dataset pour la puissance (axe Y gauche)
+        datasets.push({
+            label: `${channel} - Puissance`,
+            data: data.timestamps.map((time, i) => ({
+                x: time,
+                y: data.power_w[i]
+            })),
+            borderColor: color.border,
+            backgroundColor: color.bg,
+            borderWidth: 2,
+            yAxisID: 'y',
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+        
+        // Dataset pour l'intensité (axe Y droite)
+        datasets.push({
+            label: `${channel} - Intensité`,
+            data: data.timestamps.map((time, i) => ({
+                x: time,
+                y: data.current_a[i]
+            })),
+            borderColor: color.border,
+            backgroundColor: color.bg,
+            borderWidth: 2,
+            borderDash: [5, 5],  // Ligne pointillée pour différencier
+            yAxisID: 'y1',
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
+        
+        colorIndex++;
+    }
+    
+    powerChart.data.datasets = datasets;
+    powerChart.update();
+}
+
+// Gérer les clics sur les boutons de période
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialiser le graphique
+    initChart();
+    
+    // Boutons de période
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentPeriod = this.dataset.period;
+            loadChartData();
+        });
+    });
+    
+    // Charger les données initiales si un device est sélectionné
+    loadChartData();
+});
+
+// MODIFIER la fonction loadCycles existante pour aussi charger le graphique
+// Ajouter cet appel à la fin de loadCycles() :
+async function loadCycles() {
+    // ... code existant ...
+    
+    // Charger aussi les données du graphique
+    await loadChartData();
+}
+
+═══════════════════════════════════════════════════════════════
+
+🔄 MODIFICATIONS : Synchronisation avec filtres existants
+
+Dans la fonction qui gère les changements de filtres device/canal (probablement attachée aux <select>) :
+
+deviceFilter.addEventListener('change', function() {
+    loadCycles();  // Déjà existant
+    loadChartData();  // AJOUTER
+});
+
+channelFilter.addEventListener('change', function() {
+    loadCycles();  // Déjà existant
+    loadChartData();  // AJOUTER
+});
+
+═══════════════════════════════════════════════════════════════
+
+📝 MISE À JOUR : replit.md
+
+Ajouter dans "Recent Changes" :
+
+**2026-02-19**: Graphique temps réel des déclenchements de pompes
+
+- **New**: Endpoint `/api/power-chart-data` avec agrégation temporelle (1min/10min/1h)
+- **New**: Graphique Chart.js double axe Y (Puissance W + Intensité A)
+- **New**: Filtres temporels : 24h, 7 jours, 30 jours
+- **Feature**: Synchronisé avec filtres device/canal du dashboard
+- **Feature**: Un graph par device, masqué si plusieurs devices ou aucun sélectionné
+- **Feature**: Échelles Y automatiques avec grace 10%
+- **UX**: Responsive, légende interactive, tooltip détaillés
+
+Ajouter dans "Dependencies" :
+
+- Chart.js 4.4.0 (CDN) - Graphiques interactifs
+- chartjs-adapter-date-fns 3.0.0 (CDN) - Support échelle temporelle
+
+═══════════════════════════════════════════════════════════════
+
+✅ TESTS À EFFECTUER
+
+1. API :
+   - GET /api/power-chart-data?device_id=X&period=24h → retourne données agrégées
+   - Vérifier agrégation : 24h = 1440 points max, 7d = ~1000 points, 30d = 720 points
+   - Plusieurs canaux → data_by_channel contient toutes les clés
+
+2. Graphique :
+   - Device non sélectionné → graphique masqué
+   - Plusieurs devices sélectionnés → graphique masqué
+   - Un device + tous canaux → affiche toutes les courbes
+   - Un device + un canal → affiche seulement ce canal
+   - Clic sur "7 derniers jours" → recharge avec bonne période
+
+3. Visuel :
+   - Double axe Y visible (W à gauche, A à droite)
+   - Échelles automatiques adaptées aux valeurs (pas de Y=10000 si max=1074W)
+   - Légende cliquable pour masquer/afficher courbes
+   - Tooltip affiche valeur + unité
+
+4. Performance :
+   - Temps de réponse < 500ms pour 24h
+   - Pas de freeze du navigateur sur 30 jours
+   - Responsive mobile OK
+
+5. Synchronisation :
+   - Changement device → graphique se met à jour
+   - Changement canal → graphique se met à jour
+   - Changement période → graphique se met à jour
+
+═══════════════════════════════════════════════════════════════
+
+🎯 ORDRE D'IMPLÉMENTATION RECOMMANDÉ
+
+1. Créer l'endpoint API /api/power-chart-data dans routes.py
+2. Tester l'API manuellement (curl ou navigateur)
+3. Ajouter Chart.js CDN dans le <head> du dashboard
+4. Ajouter le HTML de la section graphique
+5. Ajouter le CSS
+6. Implémenter initChart() et updateChart()
+7. Implémenter loadChartData()
+8. Connecter aux boutons de période
+9. Synchroniser avec les filtres existants (device/canal)
+10. Tester visuellement avec différentes combinaisons
+11. Optimiser si performance < 500ms
+12. Mettre à jour replit.md
+❓ QUESTIONS DE VALIDATION
+Agrégation : J'ai proposé 1 point/min pour 24h, 1 point/10min pour 7j, 1 point/h pour 30j. C'est OK ou tu veux plus de détails ?
+Couleurs : J'ai mis des couleurs différentes par canal. Veux-tu une palette spécifique (vert pour "en marche", gris pour "arrêt") ?
+Zéros : Quand la pompe est arrêtée, il n'y a pas de données. Veux-tu afficher 0 ou laisser un "trou" dans la courbe ?
+Export : Veux-tu pouvoir exporter le graphique en image (PNG) ? Chart.js le permet facilement.
+Plusieurs devices : Tu as dit "ne pas afficher si plusieurs devices". Tu es sûr ? On pourrait afficher un graphique par device (en vertical) ?
+⚠️ POINTS DE VIGILANCE
+Performance : Avec 30 jours de données, ça peut faire beaucoup de points. L'agrégation est critique. Surveille les temps de réponse.
+Timezone : Les timestamps en base sont UTC. Chart.js va les afficher en heure locale du navigateur. C'est OK ou tu veux forcer UTC partout ?
+Données manquantes : Si le Shelly n'a pas envoyé de données pendant une période, il y aura des gaps. C'est voulu (pour voir les coupures) ou tu veux interpoler ?
+Mobile : Chart.js est responsive mais sur petit écran, le double axe Y peut être serré. J'ai mis une hauteur réduite en mobile.
+Cache : Les données sont rechargées à chaque changement de filtre. Si tu veux du temps réel, il faudra ajouter un auto-refresh (setInterval).
+✅ CHECKLIST POST-BUILD
+ Endpoint /api/power-chart-data fonctionne avec tous les paramètres
+ Chart.js chargé depuis CDN (vérifier en console)
+ Graphique s'affiche quand un device est sélectionné
+ Graphique masqué si aucun device ou plusieurs devices
+ Boutons 24h/7j/30j changent bien la période
+ Double axe Y visible (W + A)
+ Échelles Y s'adaptent automatiquement aux valeurs
+ Légende cliquable (masquer/afficher courbes)
+ Tooltip affiche valeur + unité correctes
+ Synchronisation avec filtres device/canal fonctionne
+ Performance < 500ms pour chaque période
+ Responsive mobile OK
+ Documentation replit.md mise à jour
