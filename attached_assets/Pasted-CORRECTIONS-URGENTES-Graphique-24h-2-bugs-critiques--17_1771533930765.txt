@@ -1,0 +1,146 @@
+CORRECTIONS URGENTES : Graphique 24h - 2 bugs critiques
+
+═══════════════════════════════════════════════════════════════
+
+BUG 1 : PÉRIODE 24H NE PART PAS DE MAINTENANT
+
+PROBLÈME OBSERVÉ :
+- Il est 20:43
+- Le graphique affiche 14:35 → 17:00
+- ATTENDU : (19/02 20:43) → (20/02 20:43)
+
+ROOT CAUSE : end_datetime n'utilise pas NOW()
+
+SOLUTION BACKEND (/api/power-chart-data) :
+
+Vérifier et corriger cette section :
+
+```python
+if end_date:
+    # Date spécifique fournie par l'utilisateur
+    try:
+        end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+        end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+        end_datetime = pytz.UTC.localize(end_datetime)
+    except ValueError:
+        raise HTTPException(400, "Format de date invalide")
+else:
+    # CRITICAL : Par défaut = MAINTENANT (pas dernière mesure)
+    end_datetime = datetime.now(pytz.UTC)
+
+# Calculer start selon période
+if period == "24h":
+    start_time = end_datetime - timedelta(hours=24)
+    interval = "5 minutes"
+elif period == "7d":
+    start_time = end_datetime - timedelta(days=7)
+    interval = "1 hour"
+else:  # 30d
+    start_time = end_datetime - timedelta(days=30)
+    interval = "6 hours"
+AJOUTER DES LOGS DEBUG :
+print(f"🔍 DEBUG Chart - end_date param: {end_date}", flush=True)
+print(f"🔍 DEBUG Chart - end_datetime: {end_datetime}", flush=True)
+print(f"🔍 DEBUG Chart - start_time: {start_time}", flush=True)
+print(f"🔍 DEBUG Chart - period: {period}", flush=True)
+SOLUTION FRONTEND (initialisation date picker) :
+document.addEventListener('DOMContentLoaded', function() {
+    // Date picker initialisé à AUJOURD'HUI (pas synchro avec filtre principal)
+    const today = new Date().toISOString().split('T')[0];
+    const dateInput = document.getElementById('chartEndDate');
+    if (dateInput) {
+        dateInput.value = today;
+    }
+    
+    // Charger le graphique
+    loadChartData();
+});
+COMPORTEMENT ATTENDU :
+Premier chargement → end_date = None (ou date du jour) → end_datetime = NOW()
+Graphique affiche vraiment les dernières 24 heures
+Date picker sélectionnable pour voir historique
+═══════════════════════════════════════════════════════════════
+BUG 2 : AXE X AFFICHE SEULEMENT 2 LABELS (15:00, 16:00)
+PROBLÈME OBSERVÉ :
+Axe X montre seulement 2 heures au lieu de 12-15 labels espacés
+ROOT CAUSE : Callback custom trop restrictif ou maxTicksLimit mal configuré
+SOLUTION : Corriger la configuration Chart.js pour vue 24h
+scales: {
+    x: {
+        type: 'time',
+        time: {
+            unit: 'hour',
+            displayFormats: {
+                hour: 'HH:mm'
+            }
+        },
+        ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12,
+            callback: function(value, index, ticks) {
+                const date = new Date(value);
+                
+                // Premier label : afficher date + heure
+                if (index === 0) {
+                    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                           date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                }
+                
+                // Changement de jour : afficher date + heure
+                if (index > 0) {
+                    const prevDate = new Date(ticks[index - 1].value);
+                    if (date.getDate() !== prevDate.getDate()) {
+                        return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' +
+                               date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                    }
+                }
+                
+                // CRITIQUE : Tous les autres labels → retourner l'heure
+                // NE JAMAIS retourner null, undefined, ou string vide
+                return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            }
+        },
+        title: {
+            display: false
+        }
+    },
+    y: {
+        beginAtZero: true,
+        grace: '10%',
+        title: {
+            display: true,
+            text: 'Puissance (W)'  // Ou 'Intensité (A)' selon onglet
+        }
+    }
+}
+POINT CLÉ : Le callback doit TOUJOURS retourner une string valide pour tous les ticks.
+SI LE PROBLÈME PERSISTE : Enlever complètement le callback pour tester
+ticks: {
+    autoSkip: true,
+    maxTicksLimit: 12
+    // Pas de callback custom
+}
+Chart.js affichera automatiquement 12 labels espacés uniformément.
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+Recharger le graphique (vue 24h) → vérifier les logs DEBUG
+Vérifier que end_datetime = NOW() (pas une date passée)
+Vérifier que start_time = NOW() - 24h
+Vérifier que l'axe X affiche 12 labels espacés (ex: 20:00, 22:00, 00:00, 02:00...)
+Vérifier que le dernier point de données est proche de l'heure actuelle
+Changement de jour visible : date affichée à minuit (ex: "19/02 20:00, 22:00, 20/02 00:00, 02:00...")
+RÉSULTAT ATTENDU (il est 20:43) :
+Données : 19/02 20:00 → 20/02 20:00 (environ)
+Axe X : 12 labels bien répartis
+Premier label : "19/02 20:00" ou "19/02 21:00"
+Dernier label : proche de 20:00
+═══════════════════════════════════════════════════════════════
+DEBUG : Après implémentation, me donner :
+Les logs du serveur :
+end_date reçu
+end_datetime calculé
+start_time calculé
+Console navigateur :
+Nombre de points de données reçus
+Timestamps min/max dans les données
+Ça me permettra de confirmer que les deux bugs sont résolus.

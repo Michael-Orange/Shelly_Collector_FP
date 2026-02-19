@@ -1,0 +1,59 @@
+BUG CRITIQUE : La période 24h ne part pas de MAINTENANT
+
+PROBLÈME OBSERVÉ :
+- Il est 20:43
+- Le graphique affiche 14:35 → 17:00 (environ)
+- ATTENDU : 19/02 20:43 → 20/02 20:43
+
+ROOT CAUSE : end_datetime n'est PAS NOW(), probablement une de ces raisons :
+
+1. **Backend n'utilise pas NOW()** malgré le brief
+2. **Date picker "Jusqu'au" envoie une date passée** au lieu de la date actuelle
+3. **Synchronisation avec "Date fin" du filtre principal** qui est peut-être à une date passée
+
+═══════════════════════════════════════════════════════════════
+
+SOLUTION :
+
+1. VÉRIFIER DANS L'API /api/power-chart-data :
+
+```python
+if end_date:
+    # Parser la date fournie
+    end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+    end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+    end_datetime = pytz.UTC.localize(end_datetime)
+else:
+    # CRITICAL : Si pas de end_date → NOW()
+    end_datetime = datetime.now(pytz.UTC)
+Vérifier que ce else est bien atteint quand on charge le graphique par défaut.
+VÉRIFIER LE DATE PICKER "Jusqu'au" :
+Dans le JavaScript, au chargement :
+// Initialiser avec AUJOURD'HUI
+const today = new Date().toISOString().split('T')[0];
+document.getElementById('chartEndDate').value = today;
+MAIS ATTENTION : Ne pas synchroniser avec "Date fin" du filtre principal au chargement si ce filtre est à une date passée.
+DEBUG : Ajouter des logs côté serveur
+Dans /api/power-chart-data :
+print(f"DEBUG - end_date param: {end_date}", flush=True)
+print(f"DEBUG - end_datetime calculated: {end_datetime}", flush=True)
+print(f"DEBUG - start_time calculated: {start_time}", flush=True)
+Recharger le graphique et me donner ces 3 valeurs.
+═══════════════════════════════════════════════════════════════
+COMPORTEMENT ATTENDU :
+PAR DÉFAUT (premier chargement de la page) :
+Date picker "Jusqu'au" = date du jour
+end_date envoyé à l'API = date du jour OU None
+Backend calcule end_datetime = NOW() (heure actuelle, pas 23:59)
+Graphique affiche (NOW - 24h) → NOW
+SI DATE PASSÉE SÉLECTIONNÉE :
+User change date picker à "18/02/2026"
+end_date = "2026-02-18"
+Backend calcule end_datetime = 18/02/2026 23:59
+Graphique affiche 17/02/2026 23:59 → 18/02/2026 23:59
+═══════════════════════════════════════════════════════════════
+ACTION IMMÉDIATE :
+Regarde les logs serveur pour l'appel /api/power-chart-data
+Dis-moi quelle valeur end_date est reçue
+Vérifie si le else (end_datetime = NOW()) est bien exécuté
+Le problème est là à 100%. L'API ne calcule pas NOW() correctement.

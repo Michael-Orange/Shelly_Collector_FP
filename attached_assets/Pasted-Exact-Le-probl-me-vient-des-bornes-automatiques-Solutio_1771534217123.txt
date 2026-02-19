@@ -1,0 +1,72 @@
+Exact ! Le problème vient des bornes automatiques. Solution :
+
+FORCER min/max de l'axe X dans la configuration Chart.js
+
+Dans la fonction updateChart() ou lors de la création du graphique :
+
+```javascript
+// Calculer les bornes temporelles selon la période sélectionnée
+function getChartTimeBounds() {
+    const endDateInput = document.getElementById('chartEndDate');
+    const endDate = endDateInput?.value;
+    
+    let endTime, startTime;
+    
+    // Calculer end_time
+    if (endDate) {
+        const today = new Date().toISOString().split('T')[0];
+        if (endDate === today) {
+            // Aujourd'hui → NOW
+            endTime = new Date();
+        } else {
+            // Date passée → 23:59:59 de ce jour
+            endTime = new Date(endDate + 'T23:59:59Z');
+        }
+    } else {
+        endTime = new Date();
+    }
+    
+    // Calculer start_time selon période
+    startTime = new Date(endTime);
+    if (currentPeriod === '24h') {
+        startTime.setHours(startTime.getHours() - 24);
+    } else if (currentPeriod === '7d') {
+        startTime.setDate(startTime.getDate() - 7);
+    } else { // 30d
+        startTime.setDate(startTime.getDate() - 30);
+    }
+    
+    return { min: startTime, max: endTime };
+}
+APPLIQUER dans les options du chart :
+const timeBounds = getChartTimeBounds();
+
+scales: {
+    x: {
+        type: 'time',
+        min: timeBounds.min,  // FORCER la borne min
+        max: timeBounds.max,  // FORCER la borne max
+        time: {
+            unit: 'hour',
+            displayFormats: {
+                hour: 'HH:mm'
+            }
+        },
+        ticks: {
+            autoSkip: true,
+            maxTicksLimit: 12,
+            callback: function(value, index, ticks) {
+                // ... callback existant ...
+            }
+        }
+    }
+}
+RÉSULTAT :
+L'axe X couvrira TOUTE la période demandée (24h, 7j, 30j)
+Les labels seront distribués uniformément sur cette période
+Même si les données ne couvrent qu'une petite fenêtre, l'axe sera complet
+ADAPTATION PAR PÉRIODE :
+24h : unit = 'hour', maxTicksLimit = 12
+7j : unit = 'hour', maxTicksLimit = 14
+30j : unit = 'day', maxTicksLimit = 15
+Implémente ça et l'axe X aura tous ses labels, même avec peu de données.
