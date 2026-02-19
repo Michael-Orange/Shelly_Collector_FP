@@ -667,30 +667,39 @@ async def get_power_chart_data(
     request: Request,
     device_id: str = Query(...),
     channel: str = Query(None),
-    period: str = Query("24h")
+    period: str = Query("24h"),
+    end_date: str = Query(None)
 ):
     db_pool = request.app.state.db_pool
 
     try:
-        now = datetime.now(timezone.utc)
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(
+                    hour=23, minute=59, second=59, tzinfo=timezone.utc
+                )
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Format end_date invalide. Attendu: YYYY-MM-DD")
+        else:
+            end_dt = datetime.now(timezone.utc)
 
         if period == "7d":
-            start_time = now - timedelta(days=7)
+            start_time = end_dt - timedelta(days=7)
             trunc_val = "10 minutes"
         elif period == "30d":
-            start_time = now - timedelta(days=30)
+            start_time = end_dt - timedelta(days=30)
             trunc_val = "1 hour"
         else:
-            start_time = now - timedelta(hours=24)
+            start_time = end_dt - timedelta(hours=24)
             trunc_val = "1 minute"
             period = "24h"
 
         if channel and channel != "all":
-            channel_filter = "AND channel = $3"
-            params = [device_id, start_time, channel]
+            params = [device_id, start_time, end_dt, channel]
+            channel_filter_sql = "AND channel = $4"
         else:
-            channel_filter = ""
-            params = [device_id, start_time]
+            params = [device_id, start_time, end_dt]
+            channel_filter_sql = ""
 
         if trunc_val == "10 minutes":
             time_bucket_expr = "date_trunc('hour', timestamp) + (EXTRACT(minute FROM timestamp)::int / 10) * interval '10 minutes'"
@@ -706,7 +715,8 @@ async def get_power_chart_data(
             FROM power_logs
             WHERE device_id = $1
               AND timestamp >= $2
-              {channel_filter}
+              AND timestamp <= $3
+              {channel_filter_sql}
             GROUP BY time_bucket, channel
             ORDER BY time_bucket ASC
         """
@@ -743,12 +753,19 @@ async def get_power_chart_data(
                 cdata['power_w'].append(0)
                 cdata['current_a'].append(0)
 
+        start_date_str = start_time.strftime("%Y-%m-%d")
+        end_date_str = end_dt.strftime("%Y-%m-%d")
+
         return {
             "device_id": device_id,
             "period": period,
+            "start_date": start_date_str,
+            "end_date": end_date_str,
             "data": data_by_channel
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error fetching chart data: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))

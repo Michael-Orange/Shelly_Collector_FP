@@ -386,26 +386,81 @@ def render_dashboard() -> str:
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
         }
 
-        .chart-controls h3 {
+        .chart-title {
             margin: 0;
             color: #2c3e50;
+            font-size: 1rem;
+        }
+
+        .chart-date-range {
+            color: #666;
+            font-size: 0.85rem;
+            font-weight: normal;
         }
 
         .controls-right {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .date-picker-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .date-picker-group label {
+            font-size: 0.85rem;
+            color: #555;
+            white-space: nowrap;
+        }
+
+        .chart-date-input {
+            padding: 7px 10px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: #f8f9fa;
+            color: #333;
+            transition: border-color 0.3s;
+        }
+
+        .chart-date-input:focus {
+            outline: none;
+            border-color: #2d5a3d;
+        }
+
+        .btn-reset-date {
+            padding: 6px 10px;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            transition: all 0.3s;
+            color: #555;
+        }
+
+        .btn-reset-date:hover {
+            background: #f0f0f0;
+            border-color: #2d5a3d;
+            color: #2d5a3d;
         }
 
         .period-selector {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
 
         .period-btn {
-            padding: 8px 16px;
+            padding: 7px 14px;
             border: 2px solid #2d5a3d;
             background: white;
             color: #2d5a3d;
@@ -413,7 +468,7 @@ def render_dashboard() -> str:
             cursor: pointer;
             font-weight: 500;
             transition: all 0.3s;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .period-btn:hover {
@@ -426,7 +481,7 @@ def render_dashboard() -> str:
         }
 
         .btn-chart-export {
-            padding: 8px 16px;
+            padding: 7px 14px;
             background: #2d5a3d;
             color: white;
             border: none;
@@ -434,7 +489,7 @@ def render_dashboard() -> str:
             cursor: pointer;
             font-weight: 500;
             transition: all 0.3s;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
 
         .btn-chart-export:hover {
@@ -489,6 +544,28 @@ def render_dashboard() -> str:
 
             .treatment-box-value {
                 font-size: 1.5rem;
+            }
+
+            .chart-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .controls-right {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .date-picker-group {
+                width: 100%;
+            }
+
+            .chart-date-input {
+                flex: 1;
+            }
+
+            .period-selector {
+                justify-content: center;
             }
         }
 
@@ -637,8 +714,16 @@ def render_dashboard() -> str:
 
         <div id="chart-section">
             <div class="chart-controls">
-                <h3>&#x26A1; Consommation &#233;lectrique</h3>
+                <div>
+                    <h3 class="chart-title">&#x26A1; Consommation &#233;lectrique</h3>
+                    <span id="chart-date-range" class="chart-date-range"></span>
+                </div>
                 <div class="controls-right">
+                    <div class="date-picker-group">
+                        <label>Jusqu'au :</label>
+                        <input type="date" id="chart-end-date" class="chart-date-input" onchange="onChartDateChange()">
+                        <button class="btn-reset-date" onclick="resetChartDate()" title="Revenir &#224; aujourd'hui">&#x21BB;</button>
+                    </div>
                     <div class="period-selector">
                         <button class="period-btn active" onclick="setChartPeriod('24h', this)">24h</button>
                         <button class="period-btn" onclick="setChartPeriod('7d', this)">7 jours</button>
@@ -1066,6 +1151,32 @@ def render_dashboard() -> str:
             {bg: 'rgba(231, 76, 60, 0.3)', border: '#e74c3c'}
         ];
 
+        function initChartDatePicker() {
+            const input = document.getElementById('chart-end-date');
+            const today = new Date().toISOString().split('T')[0];
+            input.value = today;
+            input.max = today;
+        }
+        initChartDatePicker();
+
+        function onChartDateChange() {
+            const input = document.getElementById('chart-end-date');
+            const today = new Date().toISOString().split('T')[0];
+            if (input.value > today) {
+                alert('La date ne peut pas \\u00eatre dans le futur.');
+                input.value = today;
+            }
+            loadChartData();
+        }
+
+        function resetChartDate() {
+            const input = document.getElementById('chart-end-date');
+            const today = new Date().toISOString().split('T')[0];
+            input.value = today;
+            input.max = today;
+            loadChartData();
+        }
+
         function setChartPeriod(period, btn) {
             currentChartPeriod = period;
             document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
@@ -1073,18 +1184,31 @@ def render_dashboard() -> str:
             loadChartData();
         }
 
+        function updateChartTitle(startDate, endDate) {
+            const el = document.getElementById('chart-date-range');
+            if (!startDate || !endDate) { el.textContent = ''; return; }
+            function fmtFr(dateStr) {
+                const parts = dateStr.split('-');
+                return parts[2] + '/' + parts[1] + '/' + parts[0];
+            }
+            el.textContent = fmtFr(startDate) + ' \\u2014 ' + fmtFr(endDate);
+        }
+
         async function loadChartData() {
             const deviceId = document.getElementById('device-filter').value;
             if (!deviceId) return;
 
             const channel = document.getElementById('channel-filter').value;
+            const endDate = document.getElementById('chart-end-date').value;
             let url = '/api/power-chart-data?device_id=' + encodeURIComponent(deviceId) + '&period=' + currentChartPeriod;
             if (channel) url += '&channel=' + encodeURIComponent(channel);
+            if (endDate) url += '&end_date=' + encodeURIComponent(endDate);
 
             try {
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
+                updateChartTitle(result.start_date, result.end_date);
                 renderChart(result.data);
             } catch (e) {
                 console.error('Chart error:', e);
