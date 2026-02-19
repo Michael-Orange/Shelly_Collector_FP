@@ -496,6 +496,39 @@ def render_dashboard() -> str:
             background: #234a30;
         }
 
+        .chart-info-banner {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+            color: #004085;
+        }
+
+        .chart-info-banner span {
+            flex: 1;
+        }
+
+        .btn-try-30 {
+            padding: 6px 12px;
+            background: #2d5a3d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-left: 15px;
+            white-space: nowrap;
+        }
+
+        .btn-try-30:hover {
+            background: #234a30;
+        }
+
         .chart-tabs {
             display: flex;
             gap: 0;
@@ -772,9 +805,9 @@ def render_dashboard() -> str:
                         <button class="btn-reset-date" onclick="resetChartDate()" title="Revenir &#224; aujourd'hui">&#x21BB;</button>
                     </div>
                     <div class="period-selector">
-                        <button class="period-btn active" onclick="setChartPeriod('24h', this)">24h</button>
-                        <button class="period-btn" onclick="setChartPeriod('7d', this)">7 jours</button>
-                        <button class="period-btn" onclick="setChartPeriod('30d', this)">30 jours</button>
+                        <button class="period-btn active" data-period="24h" onclick="setChartPeriod('24h', this)">24h</button>
+                        <button class="period-btn" data-period="7d" onclick="setChartPeriod('7d', this)">7 jours</button>
+                        <button class="period-btn" data-period="30d" onclick="setChartPeriod('30d', this)">30 jours</button>
                     </div>
                     <button class="btn-chart-export" onclick="exportChartPNG()">&#128247; PNG</button>
                 </div>
@@ -1247,6 +1280,7 @@ def render_dashboard() -> str:
             currentChartPeriod = period;
             document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            hideInfoMessage();
             loadChartData();
         }
 
@@ -1271,7 +1305,34 @@ def render_dashboard() -> str:
             el.textContent = fmtFr(startDate) + ' \\u2014 ' + fmtFr(endDate);
         }
 
-        async function loadChartData() {
+        function showInfoMessage(message, showTry30Button) {
+            let infoDiv = document.getElementById('chart-info-message');
+            if (!infoDiv) {
+                infoDiv = document.createElement('div');
+                infoDiv.id = 'chart-info-message';
+                infoDiv.className = 'chart-info-banner';
+                const chartContainer = document.querySelector('.chart-container');
+                chartContainer.parentElement.insertBefore(infoDiv, chartContainer);
+            }
+            infoDiv.innerHTML = '<span>' + message + '</span>' +
+                (showTry30Button ? '<button onclick="tryPeriod30Days()" class="btn-try-30">Essayer 30 jours</button>' : '');
+            infoDiv.style.display = 'flex';
+        }
+
+        function hideInfoMessage() {
+            const infoDiv = document.getElementById('chart-info-message');
+            if (infoDiv) infoDiv.style.display = 'none';
+        }
+
+        async function tryPeriod30Days() {
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            const btn30 = document.querySelector('.period-btn[data-period="30d"]');
+            if (btn30) btn30.classList.add('active');
+            currentChartPeriod = '30d';
+            await loadChartData();
+        }
+
+        async function loadChartData(periodOverride) {
             const deviceId = document.getElementById('device-filter').value;
             const section = document.getElementById('chart-section');
 
@@ -1281,8 +1342,9 @@ def render_dashboard() -> str:
             }
             section.style.display = 'block';
 
+            const period = periodOverride || currentChartPeriod;
             const channel = document.getElementById('channel-filter').value;
-            let url = '/api/power-chart-data?device_id=' + encodeURIComponent(deviceId) + '&period=' + currentChartPeriod;
+            let url = '/api/power-chart-data?device_id=' + encodeURIComponent(deviceId) + '&period=' + period;
             if (channel) url += '&channel=' + encodeURIComponent(channel);
             if (userPickedDate) {
                 const endDate = document.getElementById('chart-end-date').value;
@@ -1295,6 +1357,29 @@ def render_dashboard() -> str:
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
+
+                const hasData = Object.values(result.data || {}).some(function(ch) {
+                    return ch.timestamps && ch.timestamps.length > 1;
+                });
+
+                if (!hasData) {
+                    if (!periodOverride && currentChartPeriod === '24h') {
+                        console.log('Aucune donn\\u00e9e sur 24h, fallback vers 7 jours');
+                        showInfoMessage('\\u2139\\uFE0F Aucune donn\\u00e9e sur les derni\\u00e8res 24h. Affichage \\u00e9tendu \\u00e0 7 jours.', false);
+                        document.querySelectorAll('.period-btn').forEach(function(b) { b.classList.remove('active'); });
+                        var btn7d = document.querySelector('.period-btn[data-period="7d"]');
+                        if (btn7d) btn7d.classList.add('active');
+                        currentChartPeriod = '7d';
+                        return await loadChartData('7d');
+                    }
+                    if (period === '7d') {
+                        console.log('Aucune donn\\u00e9e sur 7 jours');
+                        showInfoMessage('\\u2139\\uFE0F Aucune donn\\u00e9e sur les 7 derniers jours.', true);
+                    }
+                } else {
+                    hideInfoMessage();
+                }
+
                 updateChartTitle(result.start_date, result.end_date);
                 chartTimeBounds = {
                     min: new Date(result.start_time_iso),
@@ -1305,6 +1390,7 @@ def render_dashboard() -> str:
                 renderChart(result.data);
             } catch (e) {
                 console.error('Chart error:', e);
+                showInfoMessage('Erreur de chargement des donn\\u00e9es', false);
             }
         }
 
@@ -1462,8 +1548,13 @@ def render_dashboard() -> str:
 
         document.getElementById('device-filter').addEventListener('change', function() {
             currentChartType = 'power';
+            currentChartPeriod = '24h';
             document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
             document.querySelector('.chart-tab[onclick*="power"]').classList.add('active');
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            var btn24 = document.querySelector('.period-btn[data-period="24h"]');
+            if (btn24) btn24.classList.add('active');
+            hideInfoMessage();
             loadChartData();
         });
         document.getElementById('channel-filter').addEventListener('change', function() { loadChartData(); });
