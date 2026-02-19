@@ -115,6 +115,18 @@ def render_admin() -> str:
         var pumpModels = [];
         var currentVersionConfigs = [];
 
+        async function checkExistingSession() {
+            try {
+                var res = await fetch('/api/admin/check-session');
+                if (res.ok) {
+                    document.getElementById('login-screen').style.display = 'none';
+                    document.getElementById('admin-content').style.display = 'block';
+                    loadAdminData();
+                }
+            } catch(e) {}
+        }
+        checkExistingSession();
+
         async function adminLogin() {
             var pw = document.getElementById('admin-password').value;
             var errEl = document.getElementById('login-error');

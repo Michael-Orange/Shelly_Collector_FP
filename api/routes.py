@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Query, HTTPException, Request, Header
+from fastapi.responses import JSONResponse
 from datetime import datetime, timezone, timedelta, date as date_type
 from typing import Optional, List
 from pydantic import BaseModel, validator
 import os
 import time
+import hashlib
+import hmac
 import config
 from services.cycle_detector import detect_cycles
 from services.config_service import (
@@ -408,6 +411,29 @@ async def delete_pump_model_route(request: Request, pump_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _make_admin_token():
+    secret = os.environ.get("SESSION_SECRET", "fallback-secret")
+    ts = str(int(time.time()))
+    sig = hmac.new(secret.encode(), ts.encode(), hashlib.sha256).hexdigest()
+    return f"{ts}:{sig}"
+
+def _verify_admin_token(token: str) -> bool:
+    if not token:
+        return False
+    secret = os.environ.get("SESSION_SECRET", "fallback-secret")
+    parts = token.split(":", 1)
+    if len(parts) != 2:
+        return False
+    ts, sig = parts
+    try:
+        ts_int = int(ts)
+    except ValueError:
+        return False
+    if time.time() - ts_int > 86400:
+        return False
+    expected_sig = hmac.new(secret.encode(), ts.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected_sig)
+
 @router.post("/verify-export-password")
 async def verify_export_password(request: Request):
     body = await request.json()
@@ -415,7 +441,25 @@ async def verify_export_password(request: Request):
     expected = os.environ.get("CSV_EXPORT_PASSWORD", "")
     if not expected or password != expected:
         raise HTTPException(status_code=403, detail="Mot de passe incorrect")
-    return {"success": True}
+    response = JSONResponse(content={"success": True})
+    token = _make_admin_token()
+    response.set_cookie(
+        key="admin_session",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=86400,
+        path="/"
+    )
+    return response
+
+@router.get("/admin/check-session")
+async def check_admin_session(request: Request):
+    token = request.cookies.get("admin_session", "")
+    if _verify_admin_token(token):
+        return {"authenticated": True}
+    raise HTTPException(status_code=401, detail="Non authentifié")
 
 
 class ShellyMessage(BaseModel):

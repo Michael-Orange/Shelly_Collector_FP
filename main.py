@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, HTMLResponse
+from fastapi.responses import PlainTextResponse, HTMLResponse, RedirectResponse
 import time
 from datetime import datetime, timezone
 
 import config
 from services.database import create_db_pool, close_db_pool, create_tables
-from api.routes import router as api_router
+from api.routes import router as api_router, _verify_admin_token
 from web.dashboard import render_dashboard
 from web.admin import render_admin, render_pumps_admin
 
@@ -70,7 +70,10 @@ async def admin_page():
 
 
 @app.get("/admin/pumps")
-async def admin_pumps_page():
+async def admin_pumps_page(request: Request):
+    token = request.cookies.get("admin_session", "")
+    if not _verify_admin_token(token):
+        return RedirectResponse(url="/admin", status_code=302)
     return html_response(render_pumps_admin())
 
 

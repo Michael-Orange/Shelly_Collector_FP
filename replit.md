@@ -4,7 +4,15 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-19 (Latest)**: Power consumption chart with tabs and historical date selector :
+**2026-02-19 (Latest)**: Admin session authentication :
+- **New**: HMAC-signed session cookie (`admin_session`) set on successful login (24h expiry)
+- **New**: `GET /api/admin/check-session` — verify session cookie validity
+- **New**: Server-side protection on `/admin/pumps` — redirects to `/admin` if not authenticated
+- **New**: Admin page auto-skips login if valid session cookie exists
+- **Feature**: Navigate freely between `/admin` and `/admin/pumps` without re-entering password
+- **Security**: httponly + secure + samesite=lax cookie flags, HMAC-SHA256 token signing
+
+**2026-02-19**: Power consumption chart with tabs and historical date selector :
 - **New**: `GET /api/power-chart-data` — temporal aggregation endpoint (1min/10min/1h based on period)
 - **New**: Param\u00e8tre `end_date` optionnel (YYYY-MM-DD) pour analyse historique
 - **New**: Chart.js line chart with tab system: Puissance (W) / Courant (A)
