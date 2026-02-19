@@ -1,0 +1,215 @@
+REFONTE : Séparation des graphiques Puissance et Courant avec système d'onglets
+
+PROBLÈME ACTUEL :
+Les deux axes Y (Puissance W + Courant A) sur le même graphique rendent la lecture difficile. Les courbes lissées n'ont pas de sens pour des mesures électriques discrètes.
+
+NOUVELLE APPROCHE :
+- 2 graphiques séparés (Puissance et Courant)
+- Système d'onglets pour basculer entre les deux
+- Contrôles temporels (24h/7j/30j + date) partagés entre les deux
+- Lignes droites (step) au lieu de courbes lissées
+- Masquage complet de la section si aucun device sélectionné
+
+═══════════════════════════════════════════════════════════════
+
+INTERFACE UTILISATEUR
+
+1. STRUCTURE DE LA SECTION GRAPHIQUE
+
+Quand un device est sélectionné, afficher :
+
+[Contrôles temporels - partagés]
+- Date picker "Jusqu'au"
+- Boutons 24h / 7 jours / 30 jours
+- Bouton export PNG
+
+[Onglets de sélection de graphique]
+- ⚡ Consommation électrique (W)
+- 🔌 Courant (A)
+
+[Zone de graphique]
+- Un seul canvas Chart.js
+- Contenu change selon l'onglet actif
+
+2. COMPORTEMENT DES ONGLETS
+
+- Par défaut : onglet "Consommation électrique" actif
+- Clic sur un onglet → recharge le graphique correspondant
+- Style visuel : onglet actif = fond vert Filtreplante, onglet inactif = fond blanc
+
+3. MASQUAGE COMPLET SI PAS DE DEVICE
+
+Conditions pour afficher la section complète :
+- Device sélectionné
+- Device ≠ "all" (pas "Tous les devices")
+
+Si condition non remplie :
+- Masquer TOUTE la section (contrôles + onglets + graphique)
+- Ne pas afficher de bloc vide
+- Utiliser display: none
+
+═══════════════════════════════════════════════════════════════
+
+GRAPHIQUES
+
+1. GRAPHIQUE PUISSANCE (W)
+
+- Type : line avec stepped: true (lignes droites, pas de courbes)
+- Axe Y : Puissance (W)
+- Une courbe par canal (si plusieurs canaux, sinon une seule)
+- Couleurs : palette verte Filtreplante (déjà définie)
+- Échelle Y : automatique avec grace 10%
+
+2. GRAPHIQUE COURANT (A)
+
+- Type : line avec stepped: true
+- Axe Y : Intensité (A)
+- Une courbe par canal
+- Mêmes couleurs que graphique puissance (cohérence visuelle)
+- Échelle Y : automatique avec grace 10%
+
+3. CONFIGURATION CHART.JS
+
+Options importantes à modifier :
+- tension: 0 (au lieu de 0.4) → pas de lissage
+- stepped: true → lignes en escalier
+- spanGaps: false → trous dans les données visibles
+- Un seul axe Y par graphique (plus de y1)
+
+═══════════════════════════════════════════════════════════════
+
+LOGIQUE BACKEND
+
+API reste identique :
+- /api/power-chart-data retourne toujours power_w ET current_a
+- Le frontend choisit quelles données afficher selon l'onglet actif
+
+Pas de modification côté serveur nécessaire.
+
+═══════════════════════════════════════════════════════════════
+
+LOGIQUE FRONTEND
+
+1. VARIABLE D'ÉTAT
+
+Ajouter une variable globale :
+- currentChartType = 'power' ou 'current'
+- Par défaut : 'power'
+
+2. FONCTION switchChartType(type)
+
+- Mettre à jour currentChartType
+- Mettre à jour les styles des onglets (actif/inactif)
+- Recharger le graphique avec updateChart()
+
+3. FONCTION updateChart() MODIFIÉE
+
+Selon currentChartType :
+- Si 'power' : créer datasets avec data.power_w, yAxisID='y', label="Canal X - Puissance"
+- Si 'current' : créer datasets avec data.current_a, yAxisID='y', label="Canal X - Intensité"
+
+Configuration Chart.js adaptée :
+- Un seul axe Y (plus de y1)
+- Titre axe Y selon le type : "Puissance (W)" ou "Intensité (A)"
+- stepped: true dans les options
+
+4. FONCTION loadChartData() MODIFIÉE
+
+Conditions d'affichage :
+if (!selectedDevice || selectedDevice === 'all') {
+// Masquer TOUTE la section chart-section
+chartSection.style.display = 'none';
+return;
+}
+// Afficher la section
+chartSection.style.display = 'block';
+// Charger les données et mettre à jour le graphique
+
+5. EXPORT PNG
+
+Le nom du fichier doit inclure le type de graphique :
+- filtreplante_{device}_{type}_{period}_{date}.png
+- Exemple : filtreplante_shellypro_power_7d_2026-02-19.png
+
+═══════════════════════════════════════════════════════════════
+
+STYLE VISUEL
+
+1. ONGLETS
+
+Structure HTML suggérée :
+<div class="chart-tabs"> <button class="chart-tab active" data-type="power"> ⚡ Consommation électrique (W) </button> <button class="chart-tab" data-type="current"> 🔌 Courant (A) </button> </div> ```
+CSS :
+Onglet actif : background #2d5a3d (vert Filtreplante), color white
+Onglet inactif : background white, color #2d5a3d, border 2px solid #2d5a3d
+Hover sur inactif : background #f0f7f3
+Transition smooth
+Responsive : sur mobile, onglets prennent toute la largeur
+PLACEMENT
+Ordre des éléments dans chart-section :
+Titre (avec plage de dates)
+Contrôles temporels (date + période + export)
+Onglets de graphique
+Canvas du graphique
+═══════════════════════════════════════════════════════════════
+COMPORTEMENTS ATTENDUS
+CHARGEMENT INITIAL (device sélectionné)
+Section graphique visible
+Onglet "Consommation électrique" actif
+Graphique Puissance affiché (lignes droites)
+Contrôles temporels : date=aujourd'hui, période=24h
+CLIC SUR ONGLET "Courant"
+Onglet "Courant" devient actif (fond vert)
+Onglet "Puissance" devient inactif (fond blanc)
+Graphique recharge avec données d'intensité
+Axe Y change de "Puissance (W)" à "Intensité (A)"
+Période et date restent inchangées
+CHANGEMENT DE PÉRIODE (ex: 24h → 7 jours)
+Graphique recharge avec nouvelle période
+Type de graphique actuel conservé (Power ou Current)
+CHANGEMENT DE DATE
+Même comportement : recharge avec type actuel
+CHANGEMENT DE DEVICE
+Si nouveau device sélectionné : recharge tout, onglet Power actif
+Si "Tous" ou aucun device : masquer TOUTE la section chart-section
+EXPORT PNG
+Exporte le graphique actuellement affiché (Power ou Current)
+Nom de fichier inclut le type
+═══════════════════════════════════════════════════════════════
+LIGNE DROITE VS COURBE
+Configuration Chart.js pour lignes droites :
+Dans les options du chart :
+elements: {
+    line: {
+        tension: 0,      // Pas de lissage
+        stepped: true    // Lignes en escalier
+    }
+}
+Dans chaque dataset (optionnel, si l'option globale ne suffit pas) :
+{
+    // ... autres props ...
+    stepped: true,
+    tension: 0
+}
+Résultat visuel :
+Mesure à 15:30 = 428W → ligne horizontale à 428W
+Mesure à 15:31 = 450W → saut vertical puis ligne horizontale à 450W
+Pas de pente progressive entre les deux points
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+Aucun device sélectionné → section graphique complètement masquée (pas de trace)
+Device "Tous" sélectionné → section graphique masquée
+Un device sélectionné → section visible, onglet Power actif par défaut
+Clic onglet Courant → graphique bascule, axe Y change
+Changement de période avec onglet Courant actif → reste sur Courant
+Lignes du graphique = droites (pas de courbes lissées)
+Export PNG avec onglet Power → nom fichier contient "power"
+Export PNG avec onglet Current → nom fichier contient "current"
+Responsive mobile → onglets restent cliquables et lisibles
+═══════════════════════════════════════════════════════════════
+MISE À JOUR DOCUMENTATION
+Modifier dans replit.md :
+Feature : Graphiques séparés Puissance/Courant avec onglets
+UI : Système d'onglets pour basculer entre les deux vues
+Chart config : Lignes droites (stepped: true) au lieu de courbes
+UX : Masquage complet de la section si aucun device sélectionné
