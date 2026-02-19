@@ -1,0 +1,566 @@
+PHASE 1 : SÉCURISATION DE L'APPLICATION (URGENT)
+
+OBJECTIF : Protéger les routes admin et sanitiser les erreurs exposées aux utilisateurs
+
+═══════════════════════════════════════════════════════════════
+
+PROBLÈMES ACTUELS IDENTIFIÉS :
+
+1. Route /admin accessible sans authentification
+2. Route /admin/pumps vérifie un cookie mais /admin ne le fait pas
+3. Pas de distinction entre sessions admin et tokens clients (pour futur multi-tenant)
+4. Erreurs SQL/Python exposées directement au client via HTTPException
+5. Pas de CSRF protection
+
+═══════════════════════════════════════════════════════════════
+
+PARTIE 1 : SÉCURISER LES ROUTES ADMIN
+
+1.1 CRÉER UN MODULE D'AUTHENTIFICATION
+
+Créer fichier services/auth_service.py :
+
+```python
+import secrets
+import hashlib
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from fastapi import HTTPException, Cookie, Request
+import os
+
+# Durée de vie des sessions admin (4 heures)
+ADMIN_SESSION_DURATION = timedelta(hours=4)
+
+# Store simple en mémoire (sessions admin)
+# Structure: {token: {"created_at": datetime, "expires_at": datetime}}
+admin_sessions = {}
+
+def generate_admin_token() -> str:
+    """Génère un token de session sécurisé pour admin"""
+    return secrets.token_urlsafe(32)
+
+def verify_admin_password(password: str) -> bool:
+    """Vérifie le mot de passe admin"""
+    expected = os.environ.get("ADMIN_PASSWORD")
+    if not expected:
+        print("⚠️ ADMIN_PASSWORD not configured", flush=True)
+        return False
+    return password == expected
+
+def create_admin_session() -> str:
+    """Crée une session admin et retourne le token"""
+    token = generate_admin_token()
+    now = datetime.now(timezone.utc)
+    admin_sessions[token] = {
+        "created_at": now,
+        "expires_at": now + ADMIN_SESSION_DURATION,
+        "type": "admin"
+    }
+    # Nettoyer les sessions expirées
+    cleanup_expired_sessions()
+    return token
+
+def verify_admin_token(token: Optional[str]) -> bool:
+    """Vérifie qu'un token est une session admin valide"""
+    if not token or token not in admin_sessions:
+        return False
+    
+    session = admin_sessions[token]
+    now = datetime.now(timezone.utc)
+    
+    if now > session["expires_at"]:
+        # Session expirée
+        del admin_sessions[token]
+        return False
+    
+    return session["type"] == "admin"
+
+def cleanup_expired_sessions():
+    """Nettoie les sessions expirées"""
+    now = datetime.now(timezone.utc)
+    expired = [token for token, session in admin_sessions.items() 
+               if now > session["expires_at"]]
+    for token in expired:
+        del admin_sessions[token]
+
+def revoke_admin_session(token: str):
+    """Révoque une session admin"""
+    if token in admin_sessions:
+        del admin_sessions[token]
+
+# Fonction de vérification pour tokens clients (FUTUR)
+def verify_client_token(token: Optional[str]) -> Optional[dict]:
+    """
+    Vérifie un token client et retourne les permissions associées.
+    FUTUR : à implémenter avec table client_tokens.
+    Retourne None si invalide, sinon dict avec device_ids autorisés.
+    """
+    # TODO: Implémenter avec database
+    # Pour l'instant, retourne None (pas de tokens clients actifs)
+    return None
+
+def is_admin_route(path: str) -> bool:
+    """Détermine si une route est une route admin"""
+    admin_prefixes = ["/admin", "/api/config/"]
+    return any(path.startswith(prefix) for prefix in admin_prefixes)
+1.2 MODIFIER api/routes.py
+Mettre à jour les imports en haut du fichier :
+from services.auth_service import verify_admin_token
+Remplacer la fonction _verify_admin_token existante par :
+# Supprimer l'ancienne fonction _verify_admin_token
+# Utiliser celle de services/auth_service.py
+Modifier l'endpoint /api/admin/login (s'il existe) ou le créer :
+from services.auth_service import verify_admin_password, create_admin_session
+
+@router.post("/admin/login")
+async def admin_login(request: Request):
+    try:
+        body = await request.json()
+        password = body.get("password", "")
+        
+        if not verify_admin_password(password):
+            print("⚠️ Failed admin login attempt", flush=True)
+            raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+        
+        token = create_admin_session()
+        print("✅ Admin logged in successfully", flush=True)
+        return {"success": True, "token": token}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in admin login: {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Erreur de connexion")
+Ajouter endpoint de logout :
+from services.auth_service import revoke_admin_session
+
+@router.post("/admin/logout")
+async def admin_logout(request: Request):
+    token = request.cookies.get("admin_session", "")
+    if token:
+        revoke_admin_session(token)
+    return {"success": True}
+1.3 MODIFIER main.py
+Ajouter les imports :
+from fastapi import Cookie, HTTPException
+from fastapi.responses import RedirectResponse
+from services.auth_service import verify_admin_token, is_admin_route
+Créer une dépendance d'authentification :
+async def require_admin_auth(admin_session: str = Cookie(None)):
+    """Dépendance FastAPI : vérifie que l'utilisateur est admin"""
+    if not verify_admin_token(admin_session):
+        raise HTTPException(status_code=401, detail="Authentification requise")
+    return True
+Sécuriser les routes admin :
+@app.get("/admin")
+async def admin_page(admin_session: str = Cookie(None)):
+    # Si pas de session valide, afficher page de login
+    if not verify_admin_token(admin_session):
+        return html_response(render_admin_login())
+    # Si authentifié, afficher la page admin
+    return html_response(render_admin())
+
+@app.get("/admin/pumps")
+async def admin_pumps_page(admin_session: str = Cookie(None)):
+    if not verify_admin_token(admin_session):
+        return RedirectResponse(url="/admin", status_code=302)
+    return html_response(render_pumps_admin())
+1.4 AJOUTER MIDDLEWARE DE PROTECTION GLOBALE
+Dans main.py, après le middleware de logging existant :
+@app.middleware("http")
+async def admin_protection_middleware(request: Request, call_next):
+    """Bloque l'accès admin aux tokens clients (futur)"""
+    path = request.url.path
+    
+    # Vérifier si c'est une route admin
+    if is_admin_route(path):
+        admin_session = request.cookies.get("admin_session")
+        
+        # Vérifier qu'on n'utilise pas un token client pour accéder à admin
+        # (Futur : quand tokens clients seront implémentés)
+        # Pour l'instant, vérifier juste la session admin
+        if not verify_admin_token(admin_session):
+            # Sauf pour la page de login elle-même
+            if path == "/admin" and request.method == "GET":
+                # Laisser passer (affichera le form de login)
+                pass
+            elif path == "/api/admin/login" and request.method == "POST":
+                # Laisser passer (endpoint de login)
+                pass
+            else:
+                # Bloquer
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "Authentification admin requise"}
+                )
+    
+    return await call_next(request)
+1.5 CRÉER PAGE DE LOGIN ADMIN
+Dans web/admin.py, ajouter :
+def render_admin_login() -> str:
+    return """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login - FiltrePlante</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #2d8659 0%, #1a5738 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: white;
+            border-radius: 12px;
+            padding: 3rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 {
+            color: #2d8659;
+            margin-bottom: 2rem;
+            text-align: center;
+            font-size: 1.8rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        label {
+            display: block;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 0.8rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #2d8659;
+        }
+        button {
+            width: 100%;
+            padding: 0.8rem;
+            background: #2d8659;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #1a5738;
+        }
+        .error {
+            color: #e74c3c;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            text-align: center;
+            display: none;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+        .back-link a {
+            color: #2d8659;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1>🔒 Administration</h1>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="password">Mot de passe</label>
+                <input type="password" id="password" name="password" required autofocus>
+            </div>
+            <button type="submit">Se connecter</button>
+            <div class="error" id="error-message"></div>
+        </form>
+        <div class="back-link">
+            <a href="/dashboard">← Retour au dashboard</a>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('error-message');
+            
+            try {
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                
+                if (!response.ok) {
+                    const data = await response.json();
+                    errorDiv.textContent = data.detail || 'Mot de passe incorrect';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                const data = await response.json();
+                if (data.success && data.token) {
+                    // Stocker le token dans un cookie
+                    document.cookie = `admin_session=${data.token}; path=/; max-age=14400; SameSite=Strict`;
+                    // Rediriger vers admin
+                    window.location.href = '/admin';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Erreur de connexion';
+                errorDiv.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
+"""
+═══════════════════════════════════════════════════════════════
+PARTIE 2 : SANITISER LES ERREURS EXPOSÉES
+2.1 CRÉER UN SERVICE DE GESTION D'ERREURS
+Créer fichier services/error_handler.py :
+from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
+from typing import Optional
+import traceback
+
+class AppError(Exception):
+    """Exception applicative avec code d'erreur"""
+    def __init__(self, message: str, status_code: int = 500, log_detail: Optional[str] = None):
+        self.message = message  # Message user-friendly
+        self.status_code = status_code
+        self.log_detail = log_detail  # Détails techniques (non exposés)
+        super().__init__(message)
+
+class ValidationError(AppError):
+    """Erreur de validation (400)"""
+    def __init__(self, message: str):
+        super().__init__(message, status_code=400)
+
+class NotFoundError(AppError):
+    """Ressource non trouvée (404)"""
+    def __init__(self, message: str):
+        super().__init__(message, status_code=404)
+
+class AuthenticationError(AppError):
+    """Erreur d'authentification (401)"""
+    def __init__(self, message: str = "Authentification requise"):
+        super().__init__(message, status_code=401)
+
+class ForbiddenError(AppError):
+    """Accès interdit (403)"""
+    def __init__(self, message: str = "Accès interdit"):
+        super().__init__(message, status_code=403)
+
+def sanitize_error_message(error: Exception, expose_details: bool = False) -> str:
+    """
+    Nettoie les messages d'erreur pour éviter de leaker des infos sensibles.
+    expose_details=True pour environnement dev uniquement.
+    """
+    if isinstance(error, AppError):
+        return error.message
+    
+    if isinstance(error, HTTPException):
+        return error.detail
+    
+    # Pour les autres erreurs, message générique
+    if expose_details:
+        return str(error)
+    
+    return "Une erreur est survenue"
+
+async def app_error_handler(request: Request, exc: AppError):
+    """Handler global pour AppError"""
+    # Logger les détails techniques
+    if exc.log_detail:
+        print(f"❌ AppError [{exc.status_code}]: {exc.message} | Details: {exc.log_detail}", flush=True)
+    else:
+        print(f"❌ AppError [{exc.status_code}]: {exc.message}", flush=True)
+    
+    # Retourner message sanitisé au client
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.message}
+    )
+
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Handler global pour exceptions non gérées"""
+    # Logger la stack trace complète côté serveur
+    print(f"❌ Unhandled exception: {type(exc).__name__}", flush=True)
+    print(traceback.format_exc(), flush=True)
+    
+    # Retourner message générique au client
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Une erreur interne est survenue"}
+    )
+2.2 ENREGISTRER LES HANDLERS DANS main.py
+Ajouter en haut de main.py :
+from services.error_handler import (
+    AppError, app_error_handler, generic_exception_handler
+)
+Après la création de l'app FastAPI :
+app = FastAPI()
+
+# Enregistrer les exception handlers
+app.add_exception_handler(AppError, app_error_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+
+app.include_router(api_router)
+2.3 REFACTORISER routes.py POUR UTILISER AppError
+Ajouter en haut de routes.py :
+from services.error_handler import AppError, ValidationError, NotFoundError
+Remplacer les try/except dans /api/pump-cycles :
+ANCIEN CODE :
+except Exception as e:
+    print(f"❌ Error in /api/pump-cycles: {e}", flush=True)
+    raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+NOUVEAU CODE :
+except ValidationError as e:
+    # Erreur de validation, déjà correctement formatée
+    raise
+except Exception as e:
+    # Logger les détails, exposer message générique
+    raise AppError(
+        message="Erreur lors du chargement des cycles",
+        status_code=500,
+        log_detail=str(e)
+    )
+Faire de même pour tous les endpoints :
+/api/config/devices
+/api/config/device
+/api/config/channel
+/api/config/pump-models
+etc.
+Exemple pour /api/config/device :
+@router.post("/config/device")
+async def update_device_name(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        body = await request.json()
+        did = body.get("device_id")
+        
+        if not did:
+            raise ValidationError("device_id requis")
+        
+        # ... reste du code ...
+        
+        return {"success": True}
+    
+    except ValidationError:
+        raise
+    except ValueError as e:
+        raise ValidationError(str(e))
+    except Exception as e:
+        raise AppError(
+            message="Erreur lors de la mise à jour du device",
+            status_code=500,
+            log_detail=str(e)
+        )
+═══════════════════════════════════════════════════════════════
+PARTIE 3 : AJOUTER VARIABLE D'ENVIRONNEMENT
+3.1 DOCUMENTER DANS replit.md
+Ajouter dans la section "Environment Variables / Secrets" :
+Variable	Description
+ADMIN_PASSWORD	Mot de passe pour accéder à /admin (requis)
+3.2 CONFIGURER DANS REPLIT
+Dans Replit → Secrets, ajouter :
+Clé : ADMIN_PASSWORD
+Valeur : [Choisir un mot de passe sécurisé]
+═══════════════════════════════════════════════════════════════
+PARTIE 4 : PROTECTION CSRF (OPTIONNEL MAIS RECOMMANDÉ)
+4.1 Ajouter dépendance CSRF
+Dans pyproject.toml :
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "asyncpg",
+    "itsdangerous"  # Pour génération CSRF tokens
+]
+4.2 Générer token CSRF dans services/auth_service.py
+from itsdangerous import URLSafeTimedSerializer
+import os
+
+def get_csrf_serializer():
+    secret = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
+    return URLSafeTimedSerializer(secret)
+
+def generate_csrf_token() -> str:
+    """Génère un token CSRF"""
+    serializer = get_csrf_serializer()
+    return serializer.dumps({"csrf": True})
+
+def verify_csrf_token(token: str, max_age: int = 3600) -> bool:
+    """Vérifie un token CSRF (valide 1h)"""
+    try:
+        serializer = get_csrf_serializer()
+        serializer.loads(token, max_age=max_age)
+        return True
+    except:
+        return False
+4.3 Vérifier CSRF sur endpoints critiques
+Dans routes.py :
+from services.auth_service import verify_csrf_token
+
+@router.post("/config/device")
+async def update_device_name(request: Request):
+    # Vérifier CSRF
+    csrf_token = request.headers.get("X-CSRF-Token")
+    if not verify_csrf_token(csrf_token):
+        raise ForbiddenError("Token CSRF invalide ou expiré")
+    
+    # ... reste du code ...
+═══════════════════════════════════════════════════════════════
+TESTS À EFFECTUER
+AUTHENTIFICATION ADMIN :
+Accès /admin sans cookie → affiche page login
+Login avec mauvais mdp → erreur affichée
+Login avec bon mdp → cookie créé, redirigé vers admin
+Accès /admin avec cookie valide → affiche page admin
+Accès /admin/pumps sans cookie → redirigé vers /admin
+PROTECTION API :
+Appel /api/config/devices sans session admin → 401
+Appel /api/config/devices avec session admin → 200
+SANITISATION ERREURS :
+Erreur SQL dans /api/pump-cycles → message générique au client
+Logs serveur contiennent les détails techniques
+Erreur de validation → message clair (400)
+SESSION EXPIRATION :
+Attendre 4h → session expirée, redemande login
+LOGOUT :
+Cliquer logout → cookie supprimé, redirigé vers login
+═══════════════════════════════════════════════════════════════
+RÉSUMÉ DES FICHIERS MODIFIÉS/CRÉÉS
+CRÉÉS :
+services/auth_service.py (authentification et sessions)
+services/error_handler.py (gestion d'erreurs)
+MODIFIÉS :
+main.py (routes admin sécurisées + middleware + exception handlers)
+api/routes.py (utilisation AppError + endpoint login/logout)
+web/admin.py (ajout render_admin_login())
+replit.md (documentation ADMIN_PASSWORD)
+TEMPS ESTIMÉ : 3-4 heures
+PRIORITÉ : 🔴 HAUTE (sécurité critique)
