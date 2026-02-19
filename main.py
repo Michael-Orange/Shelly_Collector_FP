@@ -72,6 +72,9 @@ async def log_requests(request: Request, call_next):
 
     response = await call_next(request)
 
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+
     duration = (time.time() - start_time) * 1000
     print(f"   \u2705 Status: {response.status_code} | Duration: {duration:.2f}ms", flush=True)
 

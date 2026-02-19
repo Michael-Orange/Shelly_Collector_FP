@@ -37,7 +37,7 @@ let allDevicesData = [];
 
 async function loadDevices() {
     try {
-        const response = await fetch('/api/config/devices');
+        const response = await fetch('/api/devices');
         if (!response.ok) return;
         const data = await response.json();
 

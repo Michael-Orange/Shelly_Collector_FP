@@ -235,6 +235,26 @@ async def get_pump_cycles(
         raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
 
 
+@router.get("/devices")
+async def get_devices_public(request: Request):
+    db_pool = request.app.state.db_pool
+    try:
+        devices = await get_all_devices_from_logs(db_pool)
+        configs = await get_configs_map(db_pool)
+        for device in devices:
+            did = device['device_id']
+            if did in configs:
+                device['device_name'] = configs[did]['device_name']
+                device['channel_names'] = {ch: info['channel_name'] for ch, info in configs[did]['channels'].items()}
+            else:
+                device['device_name'] = None
+                device['channel_names'] = {}
+        return {"devices": devices}
+    except Exception as e:
+        print(f"Error in /api/devices: {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Erreur serveur")
+
+
 @router.get("/config/devices")
 async def get_devices_config(request: Request):
     db_pool = request.app.state.db_pool
