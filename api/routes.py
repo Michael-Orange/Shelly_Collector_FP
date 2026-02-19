@@ -5,10 +5,12 @@ from typing import Optional, List
 from pydantic import BaseModel, validator
 import os
 import time
-import hashlib
-import hmac
 import config
 from services.cycle_detector import detect_cycles
+from services.auth_service import (
+    verify_admin_password, verify_csv_password,
+    create_admin_session, verify_admin_token, revoke_admin_session
+)
 from services.config_service import (
     get_all_devices_from_logs,
     get_configs_map,
@@ -411,53 +413,54 @@ async def delete_pump_model_route(request: Request, pump_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _make_admin_token():
-    secret = os.environ.get("SESSION_SECRET", "fallback-secret")
-    ts = str(int(time.time()))
-    sig = hmac.new(secret.encode(), ts.encode(), hashlib.sha256).hexdigest()
-    return f"{ts}:{sig}"
-
-def _verify_admin_token(token: str) -> bool:
-    if not token:
-        return False
-    secret = os.environ.get("SESSION_SECRET", "fallback-secret")
-    parts = token.split(":", 1)
-    if len(parts) != 2:
-        return False
-    ts, sig = parts
+@router.post("/admin/login")
+async def admin_login(request: Request):
     try:
-        ts_int = int(ts)
-    except ValueError:
-        return False
-    if time.time() - ts_int > 86400:
-        return False
-    expected_sig = hmac.new(secret.encode(), ts.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig, expected_sig)
+        body = await request.json()
+        password = body.get("password", "")
+        if not verify_admin_password(password):
+            print("⚠️ Failed admin login attempt", flush=True)
+            raise HTTPException(status_code=401, detail="Mot de passe incorrect")
+        token = create_admin_session()
+        print("✅ Admin logged in successfully", flush=True)
+        response = JSONResponse(content={"success": True})
+        response.set_cookie(
+            key="admin_session",
+            value=token,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            max_age=14400,
+            path="/"
+        )
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in admin login: {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Erreur de connexion")
+
+@router.post("/admin/logout")
+async def admin_logout(request: Request):
+    token = request.cookies.get("admin_session", "")
+    if token:
+        revoke_admin_session(token)
+    response = JSONResponse(content={"success": True})
+    response.delete_cookie(key="admin_session", path="/")
+    return response
 
 @router.post("/verify-export-password")
 async def verify_export_password(request: Request):
     body = await request.json()
     password = body.get("password", "")
-    expected = os.environ.get("CSV_EXPORT_PASSWORD", "")
-    if not expected or password != expected:
+    if not verify_csv_password(password):
         raise HTTPException(status_code=403, detail="Mot de passe incorrect")
-    response = JSONResponse(content={"success": True})
-    token = _make_admin_token()
-    response.set_cookie(
-        key="admin_session",
-        value=token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        max_age=86400,
-        path="/"
-    )
-    return response
+    return {"success": True}
 
 @router.get("/admin/check-session")
 async def check_admin_session(request: Request):
     token = request.cookies.get("admin_session", "")
-    if _verify_admin_token(token):
+    if verify_admin_token(token):
         return {"authenticated": True}
     raise HTTPException(status_code=401, detail="Non authentifié")
 

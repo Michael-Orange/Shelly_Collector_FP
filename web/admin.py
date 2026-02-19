@@ -131,7 +131,7 @@ def render_admin() -> str:
             var pw = document.getElementById('admin-password').value;
             var errEl = document.getElementById('login-error');
             try {
-                var res = await fetch('/api/verify-export-password', {
+                var res = await fetch('/api/admin/login', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({password: pw})

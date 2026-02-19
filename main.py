@@ -1,16 +1,48 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import PlainTextResponse, HTMLResponse, JSONResponse, RedirectResponse
 import time
 from datetime import datetime, timezone
 
 import config
 from services.database import create_db_pool, close_db_pool, create_tables
-from api.routes import router as api_router, _verify_admin_token
+from services.auth_service import verify_admin_token, is_admin_route
+from services.error_handler import generic_exception_handler, http_exception_handler
+from api.routes import router as api_router
 from web.dashboard import render_dashboard
 from web.admin import render_admin, render_pumps_admin
 
 app = FastAPI()
 app.include_router(api_router)
+
+app.add_exception_handler(Exception, generic_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+
+
+@app.middleware("http")
+async def admin_protection_middleware(request: Request, call_next):
+    path = request.url.path
+
+    if is_admin_route(path):
+        admin_session = request.cookies.get("admin_session")
+
+        if not verify_admin_token(admin_session):
+            if path == "/admin" and request.method == "GET":
+                pass
+            elif path == "/api/admin/login" and request.method == "POST":
+                pass
+            elif path == "/api/admin/logout" and request.method == "POST":
+                pass
+            elif path == "/api/admin/check-session" and request.method == "GET":
+                pass
+            else:
+                if path.startswith("/api/"):
+                    return JSONResponse(
+                        status_code=401,
+                        content={"error": "Authentification admin requise"}
+                    )
+                return RedirectResponse(url="/admin", status_code=302)
+
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -65,14 +97,17 @@ async def dashboard():
 
 
 @app.get("/admin")
-async def admin_page():
+async def admin_page(request: Request):
+    token = request.cookies.get("admin_session", "")
+    if not verify_admin_token(token):
+        return html_response(render_admin())
     return html_response(render_admin())
 
 
 @app.get("/admin/pumps")
 async def admin_pumps_page(request: Request):
     token = request.cookies.get("admin_session", "")
-    if not _verify_admin_token(token):
+    if not verify_admin_token(token):
         return RedirectResponse(url="/admin", status_code=302)
     return html_response(render_pumps_admin())
 
