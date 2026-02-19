@@ -7,6 +7,8 @@ def render_dashboard() -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title>FiltrePlante - Monitoring Pompes</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -371,6 +373,79 @@ def render_dashboard() -> str:
             white-space: nowrap;
         }
 
+        #chart-section {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .chart-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .chart-controls h3 {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .controls-right {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .period-selector {
+            display: flex;
+            gap: 10px;
+        }
+
+        .period-btn {
+            padding: 8px 16px;
+            border: 2px solid #2d5a3d;
+            background: white;
+            color: #2d5a3d;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+
+        .period-btn:hover {
+            background: #f0f7f3;
+        }
+
+        .period-btn.active {
+            background: #2d5a3d;
+            color: white;
+        }
+
+        .btn-chart-export {
+            padding: 8px 16px;
+            background: #2d5a3d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+
+        .btn-chart-export:hover {
+            background: #234a30;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 1rem;
@@ -560,6 +635,23 @@ def render_dashboard() -> str:
             </div>
         </div>
 
+        <div id="chart-section">
+            <div class="chart-controls">
+                <h3>&#x26A1; Consommation &#233;lectrique</h3>
+                <div class="controls-right">
+                    <div class="period-selector">
+                        <button class="period-btn active" onclick="setChartPeriod('24h', this)">24h</button>
+                        <button class="period-btn" onclick="setChartPeriod('7d', this)">7 jours</button>
+                        <button class="period-btn" onclick="setChartPeriod('30d', this)">30 jours</button>
+                    </div>
+                    <button class="btn-chart-export" onclick="exportChartPNG()">&#128247; PNG</button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="powerChart"></canvas>
+            </div>
+        </div>
+
         <div class="table-container">
             <div id="loading" class="loading">
                 <div class="spinner"></div>
@@ -649,6 +741,7 @@ def render_dashboard() -> str:
                 }
 
                 loadChannelOptions();
+                loadChartData();
             } catch (e) {
                 console.error('Error loading devices:', e);
             }
@@ -964,6 +1057,167 @@ def render_dashboard() -> str:
             link.download = 'cycles_pompes_filtreplante_' + new Date().toISOString().split('T')[0] + '.csv';
             link.click();
         }
+        let powerChart = null;
+        let currentChartPeriod = '24h';
+        const channelColors = [
+            {bg: 'rgba(45, 134, 89, 0.3)', border: '#2d8659'},
+            {bg: 'rgba(52, 152, 219, 0.3)', border: '#3498db'},
+            {bg: 'rgba(243, 156, 18, 0.3)', border: '#f39c12'},
+            {bg: 'rgba(231, 76, 60, 0.3)', border: '#e74c3c'}
+        ];
+
+        function setChartPeriod(period, btn) {
+            currentChartPeriod = period;
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadChartData();
+        }
+
+        async function loadChartData() {
+            const deviceId = document.getElementById('device-filter').value;
+            if (!deviceId) return;
+
+            const channel = document.getElementById('channel-filter').value;
+            let url = '/api/power-chart-data?device_id=' + encodeURIComponent(deviceId) + '&period=' + currentChartPeriod;
+            if (channel) url += '&channel=' + encodeURIComponent(channel);
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const result = await response.json();
+                renderChart(result.data);
+            } catch (e) {
+                console.error('Chart error:', e);
+            }
+        }
+
+        function renderChart(data) {
+            const canvas = document.getElementById('powerChart');
+            if (powerChart) {
+                powerChart.destroy();
+            }
+
+            const datasets = [];
+            let colorIdx = 0;
+
+            Object.keys(data).sort().forEach(ch => {
+                const chData = data[ch];
+                const color = channelColors[colorIdx % channelColors.length];
+                const chLabel = getChannelName(document.getElementById('device-filter').value, ch);
+
+                datasets.push({
+                    label: chLabel + ' (W)',
+                    data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData.power_w[i]})),
+                    borderColor: color.border,
+                    backgroundColor: color.bg,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    yAxisID: 'y'
+                });
+
+                datasets.push({
+                    label: chLabel + ' (A)',
+                    data: chData.timestamps.map((t, i) => ({x: new Date(t), y: chData.current_a[i]})),
+                    borderColor: color.border,
+                    borderDash: [5, 5],
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                    yAxisID: 'y1'
+                });
+
+                colorIdx++;
+            });
+
+            if (datasets.length === 0) {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.font = '16px sans-serif';
+                ctx.fillStyle = '#999';
+                ctx.textAlign = 'center';
+                ctx.fillText('Aucune donn\\u00e9e pour cette p\\u00e9riode', canvas.width / 2, canvas.height / 2);
+                return;
+            }
+
+            let timeUnit = 'minute';
+            let tooltipFormat = 'dd/MM HH:mm';
+            if (currentChartPeriod === '7d') { timeUnit = 'hour'; tooltipFormat = 'dd/MM HH:mm'; }
+            else if (currentChartPeriod === '30d') { timeUnit = 'day'; tooltipFormat = 'dd/MM/yyyy'; }
+
+            powerChart = new Chart(canvas, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { usePointStyle: true, padding: 20 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(items) {
+                                    if (!items.length) return '';
+                                    const d = items[0].parsed.x;
+                                    return new Date(d).toLocaleString('fr-FR', {timeZone: 'UTC', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: timeUnit, tooltipFormat: tooltipFormat },
+                            grid: { display: false },
+                            ticks: {
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 20,
+                                callback: function(value) {
+                                    const d = new Date(value);
+                                    if (currentChartPeriod === '30d') return d.toLocaleDateString('fr-FR', {timeZone:'UTC', day:'2-digit', month:'2-digit'});
+                                    return d.toLocaleString('fr-FR', {timeZone:'UTC', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+                                }
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: 'Puissance (W)', color: '#2d8659' },
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0,0,0,0.05)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Courant (A)', color: '#3498db' },
+                            beginAtZero: true,
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        function exportChartPNG() {
+            if (!powerChart) return;
+            const link = document.createElement('a');
+            link.download = 'consommation_' + currentChartPeriod + '_' + new Date().toISOString().split('T')[0] + '.png';
+            link.href = document.getElementById('powerChart').toDataURL('image/png');
+            link.click();
+        }
+
+        document.getElementById('device-filter').addEventListener('change', function() { loadChartData(); });
+        document.getElementById('channel-filter').addEventListener('change', function() { loadChartData(); });
     </script>
 </body>
 </html>

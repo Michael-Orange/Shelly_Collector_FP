@@ -4,7 +4,15 @@ This project is a **Shelly device data collector and monitoring dashboard** that
 
 # Recent Changes
 
-**2026-02-19 (Latest)**: Configuration versioning — SCD Type 2 :
+**2026-02-19 (Latest)**: Power consumption chart + config versioning :
+- **New**: `GET /api/power-chart-data` — temporal aggregation endpoint (1min/10min/1h based on period)
+- **New**: Chart.js line chart on dashboard with dual Y-axis (Watts left, Amperes right)
+- **New**: 3 period buttons (24h, 7 jours, 30 jours) with automatic aggregation
+- **New**: PNG export button for chart
+- **New**: Chart syncs with device/channel filters
+- **Feature**: Channels shown with distinct colors, filled area for power, dashed line for current
+
+**2026-02-19**: Configuration versioning — SCD Type 2 :
 - **New**: Table `device_config_versions` with `effective_from`/`effective_to` for temporal config tracking
 - **New**: Service `services/config_versions_service.py` with full version management
 - **New**: API `POST /api/config/version` — create new config version with effective date

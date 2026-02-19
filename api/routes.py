@@ -662,6 +662,98 @@ async def add_config_version_route(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/power-chart-data")
+async def get_power_chart_data(
+    request: Request,
+    device_id: str = Query(...),
+    channel: str = Query(None),
+    period: str = Query("24h")
+):
+    db_pool = request.app.state.db_pool
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        if period == "7d":
+            start_time = now - timedelta(days=7)
+            trunc_val = "10 minutes"
+        elif period == "30d":
+            start_time = now - timedelta(days=30)
+            trunc_val = "1 hour"
+        else:
+            start_time = now - timedelta(hours=24)
+            trunc_val = "1 minute"
+            period = "24h"
+
+        if channel and channel != "all":
+            channel_filter = "AND channel = $3"
+            params = [device_id, start_time, channel]
+        else:
+            channel_filter = ""
+            params = [device_id, start_time]
+
+        if trunc_val == "10 minutes":
+            time_bucket_expr = "date_trunc('hour', timestamp) + (EXTRACT(minute FROM timestamp)::int / 10) * interval '10 minutes'"
+        else:
+            time_bucket_expr = f"date_trunc('{trunc_val.split()[1]}', timestamp)"
+
+        query = f"""
+            SELECT
+                {time_bucket_expr} as time_bucket,
+                channel,
+                AVG(apower_w) as avg_power_w,
+                AVG(current_a) as avg_current_a
+            FROM power_logs
+            WHERE device_id = $1
+              AND timestamp >= $2
+              {channel_filter}
+            GROUP BY time_bucket, channel
+            ORDER BY time_bucket ASC
+        """
+
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        data_by_channel = {}
+        for row in rows:
+            ch = row['channel']
+            if ch not in data_by_channel:
+                data_by_channel[ch] = {
+                    'timestamps': [],
+                    'power_w': [],
+                    'current_a': []
+                }
+
+            data_by_channel[ch]['timestamps'].append(row['time_bucket'].isoformat())
+            data_by_channel[ch]['power_w'].append(round(float(row['avg_power_w']), 2) if row['avg_power_w'] else 0)
+            data_by_channel[ch]['current_a'].append(round(float(row['avg_current_a']), 3) if row['avg_current_a'] else 0)
+
+        if period == "7d":
+            bucket_delta = timedelta(minutes=10)
+        elif period == "30d":
+            bucket_delta = timedelta(hours=1)
+        else:
+            bucket_delta = timedelta(minutes=1)
+
+        for ch, cdata in data_by_channel.items():
+            if cdata['timestamps']:
+                last_time = datetime.fromisoformat(cdata['timestamps'][-1])
+                zero_time = last_time + bucket_delta
+                cdata['timestamps'].append(zero_time.isoformat())
+                cdata['power_w'].append(0)
+                cdata['current_a'].append(0)
+
+        return {
+            "device_id": device_id,
+            "period": period,
+            "data": data_by_channel
+        }
+
+    except Exception as e:
+        print(f"❌ Error fetching chart data: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats/queue")
 async def queue_stats(request: Request):
     db_pool = request.app.state.db_pool
