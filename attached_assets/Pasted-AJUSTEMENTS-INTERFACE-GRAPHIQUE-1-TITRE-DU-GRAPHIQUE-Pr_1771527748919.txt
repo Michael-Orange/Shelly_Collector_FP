@@ -1,0 +1,64 @@
+AJUSTEMENTS INTERFACE GRAPHIQUE
+
+1. TITRE DU GRAPHIQUE
+
+Problème : "⚡ Consommation électrique (W)" est spécifique à un onglet, pas adapté comme titre général.
+
+SOLUTION : Titre général + sous-titre dynamique
+
+Titre principal (fixe) : "📊 Activité électrique"
+Sous-titre (dynamique selon l'onglet) : 
+- Onglet Puissance actif → "Consommation électrique (W)"
+- Onglet Courant actif → "Intensité (A)"
+
+Structure HTML :
+<div class="chart-header"> <h3>📊 Activité électrique</h3> <p id="chart-subtitle">Consommation électrique (W)</p> <p class="date-range">(18/02/2026 - 19/02/2026)</p> </div> ```
+Mettre à jour le sous-titre lors du changement d'onglet :
+Clic sur onglet Power → sous-titre = "Consommation électrique (W)"
+Clic sur onglet Current → sous-titre = "Intensité (A)"
+SYNCHRONISATION DATE "JUSQU'AU"
+Problème : Le date picker "Jusqu'au" ne reflète pas la "Date fin" du filtre principal.
+SOLUTION : Initialiser avec la date fin du filtre principal
+Au chargement et après un clic sur "Rafraîchir" :
+Lire la valeur de l'input "Date fin" (id du champ dans les filtres principaux)
+Mettre cette valeur dans le date picker "Jusqu'au" du graphique
+Charger le graphique avec cette date
+Fonction à appeler :
+function syncChartDateWithMainFilter() {
+    const mainEndDate = document.getElementById('endDate'); // À adapter selon l'ID réel
+    const chartEndDate = document.getElementById('chartEndDate');
+    
+    if (mainEndDate && chartEndDate) {
+        chartEndDate.value = mainEndDate.value;
+    }
+}
+Appeler cette fonction :
+Au chargement initial de la page
+Après clic sur "Rafraîchir" (bouton vert des filtres principaux)
+Avant de charger les données du graphique
+ENLEVER LE REMPLISSAGE SOUS LES COURBES
+Problème : Le remplissage (backgroundColor) rend le graphique moins lisible.
+SOLUTION : Garder uniquement les lignes
+Dans la création des datasets :
+backgroundColor: 'transparent' (au lieu de rgba(..., 0.1))
+OU ne pas définir backgroundColor du tout
+Augmenter borderWidth à 2.5 ou 3 pour que les lignes soient bien visibles
+Résultat visuel :
+Lignes colorées nettes (vert Filtreplante)
+Pas de zone colorée en dessous
+Arrière-plan blanc propre
+VUE 24H PAR DÉFAUT
+Problème : Actuellement la vue 30 jours est active par défaut.
+SOLUTION : Changer la valeur initiale
+Variable globale :
+let currentPeriod = '24h';  // Au lieu de '30d'
+HTML des boutons :
+Bouton "24h" : class="period-btn active"
+Boutons "7 jours" et "30 jours" : class="period-btn" (sans active)
+═══════════════════════════════════════════════════════════════
+RÉSUMÉ DES CHANGEMENTS
+TITRE : "📊 Activité électrique" + sous-titre dynamique selon onglet
+DATE : Synchroniser "Jusqu'au" avec "Date fin" du filtre principal
+STYLE : Enlever le remplissage, garder juste les lignes (backgroundColor transparent)
+DÉFAUT : Vue 24h active au chargement (au lieu de 30 jours)
+Implémente ces 4 ajustements et teste visuellement.
