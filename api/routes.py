@@ -772,20 +772,6 @@ async def get_power_chart_data(
         async with db_pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
 
-        data_by_channel = {}
-        for row in rows:
-            ch = row['channel']
-            if ch not in data_by_channel:
-                data_by_channel[ch] = {
-                    'timestamps': [],
-                    'power_w': [],
-                    'current_a': []
-                }
-
-            data_by_channel[ch]['timestamps'].append(row['time_bucket'].isoformat())
-            data_by_channel[ch]['power_w'].append(round(float(row['avg_power_w']), 2) if row['avg_power_w'] else 0)
-            data_by_channel[ch]['current_a'].append(round(float(row['avg_current_a']), 3) if row['avg_current_a'] else 0)
-
         if period == "7d":
             bucket_delta = timedelta(hours=1)
         elif period == "30d":
@@ -793,13 +779,51 @@ async def get_power_chart_data(
         else:
             bucket_delta = timedelta(minutes=5)
 
-        for ch, cdata in data_by_channel.items():
-            if cdata['timestamps']:
-                last_time = datetime.fromisoformat(cdata['timestamps'][-1])
-                zero_time = last_time + bucket_delta
-                cdata['timestamps'].append(zero_time.isoformat())
-                cdata['power_w'].append(0)
-                cdata['current_a'].append(0)
+        gap_threshold = bucket_delta * 1.5
+
+        data_by_channel = {}
+        for row in rows:
+            ch = row['channel']
+            if ch not in data_by_channel:
+                data_by_channel[ch] = []
+
+            ts = row['time_bucket']
+            pw = round(float(row['avg_power_w']), 2) if row['avg_power_w'] else 0
+            ca = round(float(row['avg_current_a']), 3) if row['avg_current_a'] else 0
+            data_by_channel[ch].append((ts, pw, ca))
+
+        for ch in data_by_channel:
+            points = data_by_channel[ch]
+            points.sort(key=lambda x: x[0])
+            existing_ts = {p[0] for p in points}
+
+            enriched = []
+            for idx, (ts, pw, ca) in enumerate(points):
+                if idx > 0:
+                    prev_ts = points[idx - 1][0]
+                    gap = ts - prev_ts
+                    if gap >= gap_threshold:
+                        z1 = prev_ts + bucket_delta
+                        if start_time <= z1 <= end_dt and z1 not in existing_ts:
+                            enriched.append((z1, 0, 0))
+                        z2 = ts - bucket_delta
+                        if z2 > z1 and start_time <= z2 <= end_dt and z2 not in existing_ts:
+                            enriched.append((z2, 0, 0))
+                enriched.append((ts, pw, ca))
+
+            if enriched:
+                last_ts = enriched[-1][0]
+                z_end = last_ts + bucket_delta
+                if z_end <= end_dt and z_end not in existing_ts:
+                    enriched.append((z_end, 0, 0))
+
+            enriched.sort(key=lambda x: x[0])
+
+            data_by_channel[ch] = {
+                'timestamps': [p[0].isoformat() for p in enriched],
+                'power_w': [p[1] for p in enriched],
+                'current_a': [p[2] for p in enriched],
+            }
 
         start_date_str = start_time.strftime("%Y-%m-%d")
         end_date_str = end_dt.strftime("%Y-%m-%d")
