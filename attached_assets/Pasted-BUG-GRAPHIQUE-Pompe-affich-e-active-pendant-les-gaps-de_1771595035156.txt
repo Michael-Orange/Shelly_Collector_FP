@@ -1,0 +1,112 @@
+BUG GRAPHIQUE : Pompe affichée active pendant les gaps de données
+
+PROBLÈME :
+Le graphique affiche PS actif toute la nuit (14h → 10h)
+Mais le tableau montre cycle PS de 07h35 → 10h27 seulement
+
+ROOT CAUSE : 
+Chart.js avec stepped=true maintient la dernière valeur quand il n'y a pas de nouvelles mesures.
+L'endpoint /api/power-chart-data n'ajoute qu'un point à 0 À LA FIN, pas pendant les gaps.
+
+SOLUTION : Ajouter des points à 0 après chaque cycle détecté
+
+Dans /api/power-chart-data, MODIFIER la logique :
+
+Au lieu de simplement agréger les mesures, il faut :
+1. Détecter les cycles dans la période
+2. Pour chaque cycle détecté :
+   - Garder les points pendant le cycle
+   - Ajouter un point à 0 juste après la fin du cycle
+3. Remplir les gaps entre cycles avec des 0
+
+IMPLÉMENTATION RECOMMANDÉE :
+
+Option A (Simple) : Utiliser la détection de cycles existante
+
+```python
+from services.cycle_detector import detect_cycles
+
+@router.get("/power-chart-data")
+async def get_power_chart_data(...):
+    # ... code existant jusqu'à la requête SQL ...
+    
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    
+    # Convertir en format pour cycle_detector
+    power_data = [
+        (
+            row['time_bucket'],
+            row['device_id'],
+            row['channel'],
+            float(row['avg_power_w']) if row['avg_power_w'] else 0,
+            float(row['avg_current_a']) if row['avg_current_a'] else 0
+        )
+        for row in rows
+    ]
+    
+    # Détecter les cycles sur cette période
+    cycles = detect_cycles(
+        power_data,
+        gap_threshold_minutes=4,
+        min_duration_minutes=2
+    )
+    
+    # Créer les datasets avec points à 0 aux bons endroits
+    data_by_channel = {}
+    
+    for row in rows:
+        ch = row['channel']
+        if ch not in data_by_channel:
+            data_by_channel[ch] = {
+                'timestamps': [],
+                'power_w': [],
+                'current_a': []
+            }
+        
+        time_bucket = row['time_bucket']
+        
+        data_by_channel[ch]['timestamps'].append(time_bucket.isoformat())
+        data_by_channel[ch]['power_w'].append(float(row['avg_power_w']) if row['avg_power_w'] else 0)
+        data_by_channel[ch]['current_a'].append(float(row['avg_current_a']) if row['avg_current_a'] else 0)
+    
+    # AJOUTER : Points à 0 après chaque cycle
+    for cycle in cycles:
+        ch = cycle['channel']
+        if ch not in data_by_channel:
+            continue
+        
+        end_time = datetime.fromisoformat(cycle['end_time'])
+        zero_time = end_time + timedelta(minutes=1)
+        
+        # Insérer le point à 0 au bon endroit chronologique
+        data_by_channel[ch]['timestamps'].append(zero_time.isoformat())
+        data_by_channel[ch]['power_w'].append(0)
+        data_by_channel[ch]['current_a'].append(0)
+    
+    # Trier par timestamp pour avoir l'ordre chronologique
+    for ch, data in data_by_channel.items():
+        combined = list(zip(data['timestamps'], data['power_w'], data['current_a']))
+        combined.sort(key=lambda x: x[0])
+        
+        data['timestamps'] = [x[0] for x in combined]
+        data['power_w'] = [x[1] for x in combined]
+        data['current_a'] = [x[2] for x in combined]
+    
+    return {
+        "device_id": device_id,
+        "period": period,
+        "start_time": start_time.isoformat(),
+        "end_time": end_datetime.isoformat(),
+        "data": data_by_channel
+    }
+RÉSULTAT ATTENDU :
+Graphique affiche ligne verte seulement pendant le cycle 07h35 → 10h27
+Ligne tombe à 0 après 10h27
+Reste à 0 jusqu'à la fin de l'axe
+TESTS :
+Recharger le graphique vue 24h
+Vérifier que PS n'est actif que pendant les heures du tableau
+Ligne doit tomber à 0 après chaque cycle
+Pas de "fantômes" de cycles la nuit
+Implémente cette correction.
